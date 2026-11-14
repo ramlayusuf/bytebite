@@ -10,7 +10,7 @@ import { SplitVote, TogetherPanel } from "./group-order";
 
 type Panel = "basket" | "hitlist" | "search" | "camera" | "room" | "reviews" | "friends" | "chat" | "upload" | null;
 type Mode = "following" | "for-you";
-type Flight = { id: number; x: number; y: number; dx: number; dy: number; img?: string };
+type Flight = { id: number; x: number; y: number; dx: number; dy: number; img?: string; emoji?: string };
 type ChatMsg = { role: "user" | "assistant"; content: string; tools?: string[]; dishIds?: string[]; mode?: string };
 type UploadMeta = {
   id: string;
@@ -22,6 +22,7 @@ type UploadMeta = {
   cuisine: Cuisine;
   description: string;
   ingredients: string[];
+  items?: { name: string; price: number }[];
   uploaderName?: string;
 };
 
@@ -30,10 +31,20 @@ type UploadMeta = {
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 const handleOf = (d: Dish) => "@" + (d.creatorHandle ?? slug(d.restaurant));
 const ownAccount = (d: Dish) => d.uploadedBy === "restaurant" || (!!d.creatorHandle && d.creatorHandle === d.restaurantHandle);
+/* one dish out of a video that shows several: its own bag entry with its own name and price */
+const itemDish = (d: Dish, it: { name: string; price: number }, i: number): Dish => ({
+  ...d,
+  id: `${d.id}#${i}`,
+  name: it.name,
+  price: it.price,
+  items: undefined,
+});
+const compact = (n: number) =>
+  n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "")}K` : String(n);
 const hueOf = (s: string) => [...s].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
 const stars = (n: number) => "★".repeat(n) + "☆".repeat(5 - n);
 const emojiOf = (d: Dish) =>
-  (({ pizza: "🍕", burger: "🍔", sushi: "🍣", pasta: "🍝", shawarma: "🥙", biryani: "🍛", kunafa: "🍮" }) as Record<string, string>)[d.id] ?? "🍽️";
+  (({ pizza: "🍕", burger: "🍔", sushi: "🍣", pasta: "🍝", shawarma: "🥙", biryani: "🍛", kunafa: "🍮", udon: "🍜", ramen: "🍜", ethiopian: "🥘", chinese: "🥡", saj: "🥙", "truffle-pizza": "🍕", "shawarma-pizza": "🍕", satay: "🍢" }) as Record<string, string>)[d.id] ?? "🍽️";
 const CUISINE_OPTIONS: Cuisine[] = ["Burgers", "Arabic", "Japanese", "Italian", "Asian", "Indian", "Dessert", "Other"];
 
 const toDish = (u: UploadMeta): Dish => ({
@@ -44,6 +55,7 @@ const toDish = (u: UploadMeta): Dish => ({
   restaurant: u.restaurant,
   cuisine: u.cuisine,
   price: u.price,
+  items: u.items && u.items.length > 1 ? u.items : undefined,
   description: u.description || `${u.dish} from ${u.restaurant}.`,
   tags: [u.uploaderType === "restaurant" ? "Posted by the restaurant" : "Posted by a customer"],
   ingredients: u.ingredients,
@@ -139,6 +151,7 @@ function Media({
   frameRef,
   videoRef,
   onFrameLoad,
+  onProgress,
 }: {
   dish: Dish;
   live: boolean;
@@ -147,6 +160,7 @@ function Media({
   frameRef: React.RefObject<HTMLIFrameElement | null>;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   onFrameLoad: () => void;
+  onProgress: (t: number, d: number) => void;
 }) {
   const poster = dish.imageUrl ? (
     <img src={dish.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
@@ -156,17 +170,21 @@ function Media({
   if (dish.tiktokId)
     return (
       <>
-        {poster}
-        {live && !failed && (
-          <iframe
-            ref={frameRef}
-            onLoad={onFrameLoad}
-            src={`https://www.tiktok.com/player/v1/${dish.tiktokId}?${TIKTOK_PARAMS}`}
-            title={`${dish.name} on TikTok`}
-            allow="autoplay; encrypted-media; picture-in-picture"
-            className="tt-cover pointer-events-none border-0"
-          />
-        )}
+        <div className="tt-cover">
+          <div className="tt-frame">
+          {dish.imageUrl && <img src={dish.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+          {live && !failed && (
+            <iframe
+              ref={frameRef}
+              onLoad={onFrameLoad}
+              src={`https://www.tiktok.com/player/v1/${dish.tiktokId}?${TIKTOK_PARAMS}`}
+              title={`${dish.name} on TikTok`}
+              allow="autoplay; encrypted-media; picture-in-picture"
+              className="pointer-events-none absolute inset-0 h-full w-full border-0"
+            />
+          )}
+          </div>
+        </div>
         {live && failed && (
           <div className="absolute left-1/2 top-[44%] z-10 w-[78%] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-black/70 p-4 text-center backdrop-blur-md">
             <p className="text-[12px] font-bold">TikTok won&apos;t play this video here</p>
@@ -198,6 +216,7 @@ function Media({
             loop
             playsInline
             muted={!sound}
+            onTimeUpdate={(e) => onProgress(e.currentTarget.currentTime, e.currentTarget.duration)}
             className="absolute inset-0 h-full w-full object-cover"
           />
         )}
@@ -252,17 +271,31 @@ function MenuRow({ icon, title, sub, onClick }: { icon: IconName; title: string;
   );
 }
 
-function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Sheet({
+  title,
+  onClose,
+  light = false,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  light?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="absolute inset-0 z-50 bg-black/60" onClick={onClose}>
       <aside
         onClick={(e) => e.stopPropagation()}
-        className="sheet absolute inset-x-0 bottom-0 max-h-[88%] overflow-auto rounded-t-[20px] bg-[#102019] px-4 pb-8 pt-2 shadow-2xl"
+        className={`sheet absolute inset-x-0 bottom-0 max-h-[88%] overflow-auto rounded-t-[20px] px-4 pb-8 pt-2 shadow-2xl ${light ? "bg-white text-[#0b2230]" : "bg-[#102019]"}`}
       >
-        <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-white/20" />
+        <div className={`mx-auto mb-2 h-1 w-9 rounded-full ${light ? "bg-[#0b2230]/15" : "bg-white/20"}`} />
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-[15px] font-bold">{title}</h2>
-          <button onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-full bg-white/10">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className={`grid h-8 w-8 place-items-center rounded-full ${light ? "bg-[#eaf2f8]" : "bg-white/10"}`}
+          >
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -272,6 +305,8 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
+const lightInput =
+  "h-10 w-full min-w-0 rounded-lg bg-[#eef4f9] px-3 text-[12px] text-[#0b2230] outline-none placeholder:text-[#8aa0b2] focus:ring-2 focus:ring-[#4cc9f0]/50";
 const inputClass = "h-10 w-full min-w-0 rounded-lg bg-white/10 px-3 text-[12px] outline-none placeholder:text-white/35";
 
 /* ---------- the feed ---------- */
@@ -301,6 +336,9 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
   const [flights, setFlights] = useState<Flight[]>([]);
   const [bump, setBump] = useState(false);
   const [toast, setToast] = useState("");
+  const [openItems, setOpenItems] = useState<string | null>(null);
+  const [progress, setProgress] = useState({ t: 0, d: 0 });
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [panel, setPanel] = useState<Panel>(null);
   const [menuDish, setMenuDish] = useState<Dish | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -318,13 +356,12 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
   const [form, setForm] = useState({
     type: "restaurant" as "restaurant" | "customer",
     restaurant: "",
-    dish: "",
-    price: "",
     cuisine: "Other" as Cuisine,
     description: "",
     ingredients: "",
     name: "",
   });
+  const [upItems, setUpItems] = useState<{ name: string; price: string }[]>([{ name: "", price: "" }]);
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState("");
   const [poster, setPoster] = useState<Blob | null>(null);
@@ -349,6 +386,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
   const pressStart = useRef({ x: 0, y: 0 });
   const longPressed = useRef(false);
   const idCounter = useRef(0);
+  const clientIdRef = useRef("");
 
   const catalog = useMemo(() => [...uploads, ...initialDishes], [uploads, initialDishes]);
   const total = useMemo(() => basket.reduce((s, x) => s + x.price, 0), [basket]);
@@ -377,6 +415,18 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
         const t = localStorage.getItem("crave-upload-tokens");
         if (t) setTokens(JSON.parse(t));
       } catch {}
+      try {
+        let c = localStorage.getItem("crave-client-id");
+        if (!c) {
+          c = Math.random().toString(36).slice(2) + Date.now().toString(36);
+          localStorage.setItem("crave-client-id", c);
+        }
+        clientIdRef.current = c;
+      } catch {}
+      fetch("/api/likes", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d: { counts?: Record<string, number> }) => setLikeCounts(d.counts ?? {}))
+        .catch(() => {});
       setLoaded(true);
       fetch("/api/uploads", { cache: "no-store" })
         .then((r) => r.json())
@@ -426,6 +476,10 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
       if (data.type === "onPlayerReady") {
         send(sound ? "unMute" : "mute");
         send("play");
+      } else if (data.type === "onCurrentTime") {
+        const v = (data.value ?? data) as { currentTime?: number; duration?: number };
+        if (typeof v.currentTime === "number" && typeof v.duration === "number" && v.duration > 0)
+          setProgress({ t: v.currentTime, d: v.duration });
       } else if (data.type === "onStateChange") {
         if (data.value === 1) setPaused(false);
         else if (data.value === 2) setPaused(true);
@@ -454,7 +508,8 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     setToast(m);
     setTimeout(() => setToast(""), 1800);
   };
-  const tt = (type: string) => frameRef.current?.contentWindow?.postMessage({ type, "x-tiktok-player": true }, "*");
+  const tt = (type: string, value?: number) =>
+    frameRef.current?.contentWindow?.postMessage({ type, ...(value === undefined ? {} : { value }), "x-tiktok-player": true }, "*");
   const setCleanMode = (value: boolean) => {
     cleanRef.current = value;
     setClean(value);
@@ -476,6 +531,16 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     setSplit(false);
   };
 
+  /* click the line to jump to that point in the video */
+  const seekFromClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (!progress.d) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const to = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * progress.d;
+    setProgress({ t: to, d: progress.d });
+    if (feed[current]?.tiktokId) tt("seekTo", to);
+    if (videoRef.current) videoRef.current.currentTime = to;
+  };
   const onFrameLoad = () => {
     setTimeout(() => {
       tt(sound ? "unMute" : "mute");
@@ -510,6 +575,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     viewAt.current = 0;
     setCurrent(0);
     setPaused(false);
+    setProgress({ t: 0, d: 0 });
     requestAnimationFrame(() => feedRef.current?.scrollTo({ top: 0 }));
     return list;
   };
@@ -531,6 +597,17 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     const yes = !liked.has(dish.id);
     toggleSet(setLiked, dish.id);
     learn(dish, yes ? "like" : "unlike");
+    setLikeCounts((c) => ({ ...c, [dish.id]: Math.max(0, (c[dish.id] ?? 0) + (yes ? 1 : -1)) }));
+    fetch("/api/likes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dishId: dish.id, clientId: clientIdRef.current, liked: yes }),
+    })
+      .then((r) => r.json())
+      .then((d: { count?: number }) => {
+        if (typeof d.count === "number") setLikeCounts((c) => ({ ...c, [dish.id]: d.count as number }));
+      })
+      .catch(() => {});
     if (yes) flash(`More ${dish.cuisine} coming up`);
   };
   const save = (dish: Dish) => {
@@ -556,7 +633,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
       const y = a.top + a.height / 2 - screen.top;
       setFlights((f) => [
         ...f,
-        { id, x, y, dx: b.left + b.width / 2 - screen.left - x, dy: b.top + b.height / 2 - screen.top - y, img: dish.imageUrl },
+        { id, x, y, dx: b.left + b.width / 2 - screen.left - x, dy: b.top + b.height / 2 - screen.top - y, img: dish.imageUrl, emoji: emojiOf(dish) },
       ]);
       setTimeout(() => setFlights((f) => f.filter((i) => i.id !== id)), 800);
     }
@@ -574,7 +651,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     if (next.has(h)) next.delete(h);
     else next.add(h);
     setFollows(next);
-    flash(next.has(h) ? `Following ${h}` : `Unfollowed ${h}`);
+    flash(next.has(h) ? `Following ${h.slice(1)}` : `Unfollowed ${h.slice(1)}`);
   };
 
   /* long-press menu: "not interested" / "don't recommend" / delete own upload */
@@ -597,7 +674,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
       if (!r.ok) throw new Error("Couldn't delete that video");
       setUploads((u) => u.filter((d) => d.id !== dish.id));
       setFeed((cur) => cur.filter((d) => d.id !== dish.id));
-      setBasket((b) => b.filter((d) => d.id !== dish.id));
+      setBasket((b) => b.filter((d) => d.id !== dish.id && !d.id.startsWith(`${dish.id}#`)));
       flash("Your video was deleted");
     } catch (e) {
       flash(e instanceof Error ? e.message : "Couldn't delete that video");
@@ -614,12 +691,21 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     viewAt.current = now;
     setCurrent(next);
     setPaused(false);
+    setProgress({ t: 0, d: 0 });
+    setOpenItems(null);
   };
 
   const isInteractive = (e: React.SyntheticEvent) =>
     !!(e.target as HTMLElement).closest("button,a,input,textarea,label,select,aside");
 
   /* Tap the video: single tap clears/restores the text, double tap loves, hold opens the menu. */
+  /* one tap: bring the text back if it was cleared, otherwise play/pause the video */
+  const singleTap = (dish: Dish) => {
+    if (openItems) return setOpenItems(null);
+    if (cleanRef.current) return setCleanMode(false);
+    if ((dish.tiktokId || dish.videoUrl) && !failed.has(dish.id)) return togglePlay();
+    setCleanMode(true);
+  };
   const onTap = (dish: Dish, e: React.MouseEvent) => {
     if (longPressed.current) {
       longPressed.current = false;
@@ -641,7 +727,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     }
     tapTimer.current = setTimeout(() => {
       tapTimer.current = null;
-      setCleanMode(!cleanRef.current);
+      singleTap(dish);
     }, 260);
   };
   const startPress = (dish: Dish, e: React.PointerEvent) => {
@@ -743,9 +829,11 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     setFilePreview("");
     setPoster(null);
     setFormError("");
-    setForm({ type: "restaurant", restaurant: "", dish: "", price: "", cuisine: "Other", description: "", ingredients: "", name: "" });
+    setForm({ type: "restaurant", restaurant: "", cuisine: "Other", description: "", ingredients: "", name: "" });
+    setUpItems([{ name: "", price: "" }]);
   };
-  const canPost = !!file && form.restaurant.trim() && form.dish.trim() && form.price !== "" && Number(form.price) >= 0 && !posting;
+  const validItems = upItems.filter((i) => i.name.trim() && i.price !== "" && Number(i.price) >= 0);
+  const canPost = !!file && form.restaurant.trim() && validItems.length > 0 && !posting;
   const submitUpload = async () => {
     if (!file || !canPost) return;
     setPosting(true);
@@ -756,11 +844,10 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
       if (poster) body.set("poster", new File([poster], "poster.jpg", { type: "image/jpeg" }));
       body.set("uploaderType", form.type);
       body.set("restaurant", form.restaurant);
-      body.set("dish", form.dish);
-      body.set("price", form.price);
+      body.set("items", JSON.stringify(validItems.map((i) => ({ name: i.name.trim(), price: Number(i.price) }))));
       body.set("cuisine", form.cuisine);
       body.set("description", form.description);
-      body.set("ingredients", form.ingredients);
+      body.set("ingredients", form.type === "restaurant" ? form.ingredients : "");
       body.set("uploaderName", form.name);
       const r = await fetch("/api/uploads", { method: "POST", body });
       const data = await r.json();
@@ -833,7 +920,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
         {/* top bar: Careem mark · Following  For You · assistant + search */}
         <header className="hud top-bar pointer-events-none absolute inset-x-0 top-0 z-30 grid grid-cols-[1fr_auto_1fr] items-center px-4">
           <div className="pointer-events-auto flex items-center">
-            <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#2de3a1] text-base font-bold text-[#062a1c]">C</span>
+            <img src="/careem-icon.svg" alt="Careem" className="h-7 w-7" />
           </div>
           <div className="pointer-events-auto flex gap-5" style={{ textShadow: "0 1px 8px rgba(0,0,0,.7)" }}>
             {(["following", "for-you"] as Mode[]).map((m) => (
@@ -889,8 +976,11 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
             const activity = friendActivity[dish.id] ?? [];
             const friends = activity.map((a) => a.name);
             const handle = handleOf(dish);
+            const displayName = dish.creatorHandle ?? slug(dish.restaurant);
             const isFollowing = follows.has(handle);
             const inBag = basket.some((x) => x.id === dish.id);
+            const multi = (dish.items?.length ?? 0) > 1;
+            const itemsInBag = basket.filter((x) => x.id.startsWith(`${dish.id}#`)).length;
             const comments = reviewList(dish);
             const isCurrent = index === current;
             const isOpen = expanded === dish.id;
@@ -916,6 +1006,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                   frameRef={frameRef}
                   videoRef={videoRef}
                   onFrameLoad={onFrameLoad}
+                  onProgress={(tm, d) => d > 0 && setProgress({ t: tm, d })}
                 />
 
                 <div className="hud pointer-events-none absolute inset-0">
@@ -979,7 +1070,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                         <Icon name={isFollowing ? "check" : "plus"} size={12} />
                       </button>
                     </div>
-                    <RailButton label={liked.has(dish.id) ? "Loved" : "Love"} icon="heart" active={liked.has(dish.id)} onClick={() => love(dish)} />
+                    <RailButton label={compact(likeCounts[dish.id] ?? 0)} icon="heart" active={liked.has(dish.id)} onClick={() => love(dish)} />
                     <RailButton label={String(comments.length)} icon="chat" onClick={() => openReviews(dish)} />
                     <RailButton
                       label={saved.has(dish.id) ? "Saved" : "Save"}
@@ -1019,12 +1110,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                       </button>
                     )}
                     <p className="flex items-center gap-1 text-[14px] font-bold">
-                      {handle}
-                      {ownAccount(dish) && (
-                        <span className="grid h-3.5 w-3.5 place-items-center rounded-full bg-[#2de3a1] text-[#062a1c]">
-                          <Icon name="check" size={9} />
-                        </span>
-                      )}
+                      {displayName}
                     </p>
                     <p className={`mt-1 text-[12.5px] leading-[1.35] ${isOpen ? "" : "line-clamp-2"}`}>
                       <b>{dish.name}</b> at {dish.restaurant} — {dish.description} <b className="text-white/90">{tags}</b>
@@ -1046,7 +1132,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                             rel="noreferrer"
                             className="pointer-events-auto underline"
                           >
-                            {dish.restaurant} on TikTok: @{dish.restaurantHandle} ↗
+                            {dish.restaurant} on TikTok: {dish.restaurantHandle} ↗
                           </a>
                         )}
                         {ownAccount(dish) && <span>✔ Posted by the restaurant</span>}
@@ -1060,19 +1146,57 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     )}
                   </div>
 
+                  {/* the dishes in this video: pick which one(s) to add */}
+                  {multi && openItems === dish.id && (
+                    <div
+                      className="pointer-events-auto absolute inset-x-4 rounded-2xl bg-black/70 p-1 backdrop-blur-md"
+                      style={{ bottom: "calc(var(--nav-h) + 40px)" }}
+                    >
+                      {(dish.items ?? []).map((it, i) => {
+                        const itemId = `${dish.id}#${i}`;
+                        const has = basket.some((x) => x.id === itemId);
+                        return (
+                          <div key={itemId} className="flex items-center gap-3 px-2.5 py-2">
+                            <span className="min-w-0 flex-1 truncate text-[11.5px] font-bold">{it.name}</span>
+                            <span className="text-[10.5px] text-white/70">AED {it.price}</span>
+                            <button
+                              onClick={(e) => toggleBag(itemDish(dish, it, i), e.currentTarget)}
+                              className={`w-14 text-right text-[10.5px] font-bold ${has ? "text-[#2de3a1]" : "text-white"}`}
+                            >
+                              {has ? "Remove" : "Add"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* minimal order row */}
                   <div
                     className="pointer-events-auto absolute inset-x-4 flex items-center justify-between"
                     style={{ bottom: "calc(var(--nav-h) + 10px)", textShadow: "0 1px 8px rgba(0,0,0,.75)" }}
                   >
-                    <p className="text-[12.5px] font-bold">AED {dish.price}</p>
-                    <button
-                      onClick={(e) => toggleBag(dish, e.currentTarget)}
-                      className={`flex items-center gap-1.5 text-[10.5px] font-bold transition active:scale-95 ${inBag ? "text-[#2de3a1]" : "text-white"}`}
-                    >
-                      <Icon name={inBag ? "check" : "bag"} size={15} />
-                      {inBag ? "In bag · remove" : "Add to bag"}
-                    </button>
+                    <p className="text-[12.5px] font-bold">
+                      {multi ? `${dish.items?.length} dishes · from AED ${Math.min(...(dish.items ?? []).map((x) => x.price))}` : `AED ${dish.price}`}
+                    </p>
+                    {multi ? (
+                      <button
+                        onClick={() => setOpenItems(openItems === dish.id ? null : dish.id)}
+                        className={`flex items-center gap-1.5 text-[10.5px] font-bold transition active:scale-95 ${itemsInBag > 0 ? "text-[#2de3a1]" : "text-white"}`}
+                      >
+                        <Icon name={itemsInBag > 0 ? "check" : "bag"} size={15} />
+                        {itemsInBag > 0 ? `In bag (${itemsInBag})` : "Add to bag"}
+                        <span>{openItems === dish.id ? "▴" : "▾"}</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => toggleBag(dish, e.currentTarget)}
+                        className={`flex items-center gap-1.5 text-[10.5px] font-bold transition active:scale-95 ${inBag ? "text-[#2de3a1]" : "text-white"}`}
+                      >
+                        <Icon name={inBag ? "check" : "bag"} size={15} />
+                        {inBag ? "In bag · remove" : "Add to bag"}
+                      </button>
+                    )}
                   </div>
 
                   {index === 0 && (
@@ -1080,12 +1204,25 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                       className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/55 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-white/80 backdrop-blur"
                       style={{ bottom: "calc(var(--nav-h) + 190px)" }}
                     >
-                      Tap to clear · hold for more
+                      Tap to pause · hold for more
                     </p>
                   )}
                 </div>
 
-                {isCurrent && <div key={dish.id + current} className="progress" />}
+                {isCurrent && playable && progress.d > 0 && (
+                  <div
+                    role="slider"
+                    aria-label="Video position"
+                    aria-valuemin={0}
+                    aria-valuemax={Math.round(progress.d)}
+                    aria-valuenow={Math.round(progress.t)}
+                    className="seek"
+                    onClick={seekFromClick}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <div className="seek-fill" style={{ width: `${Math.min(100, (progress.t / progress.d) * 100)}%` }} />
+                  </div>
+                )}
               </section>
             );
           })}
@@ -1101,49 +1238,59 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
             <Icon name="heart" filled size={90} />
           </span>
         ))}
-        {flights.map((f) => (
-          <img
-            key={f.id}
-            src={f.img}
-            alt=""
-            className="fly pointer-events-none absolute z-[60] h-11 w-11 rounded-xl border-2 border-white bg-white object-cover shadow-lg"
-            style={{ left: f.x - 22, top: f.y - 22, ["--dx" as string]: `${f.dx}px`, ["--dy" as string]: `${f.dy}px` }}
-          />
-        ))}
+        {flights.map((f) =>
+          f.img ? (
+            <img
+              key={f.id}
+              src={f.img}
+              alt=""
+              className="fly pointer-events-none absolute z-[60] h-11 w-11 rounded-xl border-2 border-white bg-white object-cover shadow-lg"
+              style={{ left: f.x - 22, top: f.y - 22, ["--dx" as string]: `${f.dx}px`, ["--dy" as string]: `${f.dy}px` }}
+            />
+          ) : (
+            <span
+              key={f.id}
+              className="fly pointer-events-none absolute z-[60] grid h-11 w-11 place-items-center rounded-xl bg-white text-2xl shadow-lg"
+              style={{ left: f.x - 22, top: f.y - 22, ["--dx" as string]: `${f.dx}px`, ["--dy" as string]: `${f.dy}px` }}
+            >
+              {f.emoji}
+            </span>
+          ),
+        )}
 
-        {/* bottom bar: TikTok-style, black and slim */}
+        {/* bottom bar: TikTok-style, black, slim and small */}
         <nav className="hud tabbar absolute inset-x-0 bottom-0 z-40 flex items-start justify-around bg-black px-1 pt-1.5 text-white/60">
-          <button className="flex w-16 flex-col items-center gap-0.5 text-[9px] font-bold text-white">
-            <Icon name="home" size={22} filled />
+          <button className="flex w-14 flex-col items-center gap-0.5 text-[8.5px] font-bold text-white">
+            <Icon name="home" size={18} filled />
             Discover
           </button>
-          <button onClick={() => openPanel("room")} className="flex w-16 flex-col items-center gap-0.5 text-[9px] font-bold">
-            <Icon name="users" size={22} />
+          <button onClick={() => openPanel("room")} className="flex w-14 flex-col items-center gap-0.5 text-[8.5px] font-bold">
+            <Icon name="users" size={18} />
             Together
           </button>
           <button
             onClick={() => openPanel("upload")}
             aria-label="Share a dish video"
-            className="grid h-8 w-11 place-items-center rounded-lg bg-[#2de3a1] text-[#062a1c] transition active:scale-90"
+            className="grid h-7 w-10 place-items-center rounded-lg bg-[#2de3a1] text-[#062a1c] transition active:scale-90"
           >
-            <Icon name="plus" size={20} />
+            <Icon name="plus" size={17} />
           </button>
           <button
             ref={bagRef}
             onClick={() => openPanel("basket")}
             aria-label="Open bag"
-            className={`relative flex w-16 flex-col items-center gap-0.5 text-[9px] font-bold ${bump ? "bump" : ""}`}
+            className={`relative flex w-14 flex-col items-center gap-0.5 text-[8.5px] font-bold ${bump ? "bump" : ""}`}
           >
-            <Icon name="bag" size={22} />
+            <Icon name="bag" size={18} />
             Bag
             {basket.length > 0 && (
-              <span className="absolute right-3 top-[-3px] grid h-[16px] min-w-[16px] place-items-center rounded-full bg-[#2de3a1] px-1 text-[9px] font-bold text-[#062a1c]">
+              <span className="absolute right-2.5 top-[-3px] grid h-[14px] min-w-[14px] place-items-center rounded-full bg-[#2de3a1] px-1 text-[8.5px] font-bold text-[#062a1c]">
                 {basket.length}
               </span>
             )}
           </button>
-          <button onClick={() => openPanel("camera")} className="flex w-16 flex-col items-center gap-0.5 text-[9px] font-bold">
-            <Icon name="camera" size={22} />
+          <button onClick={() => openPanel("camera")} className="flex w-14 flex-col items-center gap-0.5 text-[8.5px] font-bold">
+            <Icon name="camera" size={18} />
             Find dish
           </button>
         </nav>
@@ -1165,6 +1312,15 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
             <div onClick={(e) => e.stopPropagation()} className="sheet absolute inset-x-0 bottom-0 rounded-t-[20px] bg-[#102019] px-4 pb-8 pt-2">
               <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/20" />
               <p className="mb-2 truncate text-[10.5px] font-bold uppercase tracking-widest text-white/40">{menuDish.name}</p>
+              <MenuRow
+                icon="eye"
+                title="Clear display"
+                sub="Hide the text. Tap the screen to bring it back"
+                onClick={() => {
+                  setMenuDish(null);
+                  setCleanMode(true);
+                }}
+              />
               <MenuRow icon="eyeoff" title="Not interested" sub="Don't show this dish again" onClick={() => hideDishes(menuDish, "dish")} />
               <MenuRow
                 icon="close"
@@ -1192,7 +1348,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
         )}
 
         {panel && (
-          <Sheet title={panelTitle[panel]} onClose={close}>
+          <Sheet title={panelTitle[panel]} onClose={close} light={panel === "friends" || panel === "upload"}>
             {panel === "chat" && (
               <div>
                 <div className="hide-scrollbar max-h-[46vh] min-h-[120px] space-y-3 overflow-y-auto pr-1">
@@ -1273,7 +1429,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
 
             {panel === "upload" && (
               <div>
-                <div className="mb-3 flex rounded-full bg-white/10 p-1 text-[11.5px] font-bold">
+                <div className="mb-3 flex rounded-full bg-[#e8f1f8] p-1 text-[12px] font-bold">
                   {(
                     [
                       ["restaurant", "I'm the restaurant"],
@@ -1283,14 +1439,14 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     <button
                       key={key}
                       onClick={() => setForm((f) => ({ ...f, type: key }))}
-                      className={`flex-1 rounded-full py-1.5 transition ${form.type === key ? "bg-white text-[#062a1c]" : "text-white/70"}`}
+                      className={`flex-1 rounded-full py-1.5 transition ${form.type === key ? "bg-white text-[#0b2230] shadow-sm" : "text-[#5b7083]"}`}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
 
-                <label className="mb-3 grid cursor-pointer place-items-center overflow-hidden rounded-2xl border border-dashed border-white/25 bg-white/5 text-center">
+                <label className="mb-3 grid cursor-pointer place-items-center overflow-hidden rounded-2xl border border-dashed border-[#b4d2e6] bg-[#f3f9fd] text-center">
                   <input
                     type="file"
                     accept="video/mp4,video/webm,video/quicktime"
@@ -1300,85 +1456,91 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                   {filePreview ? (
                     <video src={filePreview} muted playsInline autoPlay loop className="h-44 w-full object-cover" />
                   ) : (
-                    <span className="py-8">
-                      <span className="mx-auto mb-2 grid h-11 w-11 place-items-center rounded-full bg-[#2de3a1] text-[#062a1c]">
+                    <span className="py-7">
+                      <span className="mx-auto mb-2 grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-[#2de3a1] to-[#4cc9f0] text-[#062a1c]">
                         <Icon name="plus" />
                       </span>
                       <strong className="block text-[12px]">Choose a video</strong>
-                      <small className="text-white/45">MP4, WebM or MOV · up to 100 MB</small>
+                      <small className="text-[10.5px] text-[#5b7083]">MP4, WebM or MOV · up to 100 MB</small>
                     </span>
                   )}
                 </label>
 
                 <div className="space-y-2">
-                  <input
-                    className={inputClass}
-                    placeholder="Restaurant name *"
-                    maxLength={80}
-                    value={form.restaurant}
-                    onChange={(e) => setForm((f) => ({ ...f, restaurant: e.target.value }))}
-                  />
-                  <input
-                    className={inputClass}
-                    placeholder="Dish name *"
-                    maxLength={80}
-                    value={form.dish}
-                    onChange={(e) => setForm((f) => ({ ...f, dish: e.target.value }))}
-                  />
-                  <div className="flex gap-2">
-                    <input
-                      className={inputClass}
-                      placeholder="Price (AED) *"
-                      inputMode="decimal"
-                      value={form.price}
-                      onChange={(e) => setForm((f) => ({ ...f, price: e.target.value.replace(/[^0-9.]/g, "") }))}
-                    />
-                    <select
-                      className={inputClass + " bg-[#1a3126]"}
-                      value={form.cuisine}
-                      onChange={(e) => setForm((f) => ({ ...f, cuisine: e.target.value as Cuisine }))}
+                  <input className={lightInput} placeholder="Restaurant name *" maxLength={80} value={form.restaurant} onChange={(e) => setForm((f) => ({ ...f, restaurant: e.target.value }))} />
+                  <p className="pt-1 text-[10.5px] font-bold uppercase tracking-wider text-[#5b7083]">Dishes in this video</p>
+                  {upItems.map((it, i) => (
+                    <div key={i} className="flex gap-2">
+                      <input
+                        className={lightInput}
+                        placeholder={i === 0 ? "Dish name *" : "Another dish"}
+                        maxLength={80}
+                        value={it.name}
+                        onChange={(e) => setUpItems((l) => l.map((x, k) => (k === i ? { ...x, name: e.target.value } : x)))}
+                      />
+                      <input
+                        className={lightInput + " !w-24 shrink-0"}
+                        placeholder="AED *"
+                        inputMode="decimal"
+                        value={it.price}
+                        onChange={(e) => setUpItems((l) => l.map((x, k) => (k === i ? { ...x, price: e.target.value.replace(/[^0-9.]/g, "") } : x)))}
+                      />
+                      {upItems.length > 1 && (
+                        <button
+                          aria-label="Remove this dish"
+                          onClick={() => setUpItems((l) => l.filter((_, k) => k !== i))}
+                          className="grid h-10 w-8 shrink-0 place-items-center rounded-lg text-[#7a8fa0]"
+                        >
+                          <Icon name="close" size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {upItems.length < 8 && (
+                    <button
+                      onClick={() => setUpItems((l) => [...l, { name: "", price: "" }])}
+                      className="flex items-center gap-1.5 text-[11.5px] font-bold text-[#0a8fb8]"
                     >
-                      {CUISINE_OPTIONS.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      <Icon name="plus" size={14} /> Add another dish
+                    </button>
+                  )}
+                  <select className={lightInput} value={form.cuisine} onChange={(e) => setForm((f) => ({ ...f, cuisine: e.target.value as Cuisine }))}>
+                    {CUISINE_OPTIONS.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                   <textarea
-                    className={inputClass + " h-20 resize-none py-2"}
+                    className={lightInput + " h-20 resize-none py-2"}
                     placeholder="What is it? Describe the dish"
                     maxLength={400}
                     value={form.description}
                     onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                   />
-                  <input
-                    className={inputClass}
-                    placeholder="Ingredients, separated by commas"
-                    maxLength={300}
-                    value={form.ingredients}
-                    onChange={(e) => setForm((f) => ({ ...f, ingredients: e.target.value }))}
-                  />
-                  {form.type === "customer" && (
+                  {form.type === "restaurant" && (
                     <input
-                      className={inputClass}
-                      placeholder="Your name (optional)"
-                      maxLength={40}
-                      value={form.name}
-                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                      className={lightInput}
+                      placeholder="Ingredients, separated by commas"
+                      maxLength={300}
+                      value={form.ingredients}
+                      onChange={(e) => setForm((f) => ({ ...f, ingredients: e.target.value }))}
                     />
+                  )}
+                  {form.type === "customer" && (
+                    <input className={lightInput} placeholder="Your name (optional)" maxLength={40} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
                   )}
                 </div>
 
-                {formError && <p className="mt-3 text-[12px] font-semibold text-[#ff8a8a]">{formError}</p>}
+                {formError && <p className="mt-3 text-[12px] font-semibold text-[#d64545]">{formError}</p>}
                 <button
                   onClick={() => void submitUpload()}
                   disabled={!canPost}
-                  className="mt-4 w-full rounded-xl bg-[#2de3a1] py-3 font-bold text-[#062a1c] disabled:opacity-40"
+                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] py-3 text-[13px] font-bold text-[#062a1c] shadow-[0_6px_18px_rgba(76,201,240,.35)] disabled:opacity-40 disabled:shadow-none"
                 >
                   {posting ? "Uploading…" : "Post video"}
                 </button>
-                <p className="mt-3 text-center text-[9.5px] leading-4 text-white/40">
+                <p className="mt-3 text-center text-[10px] leading-4 text-[#7a8fa0]">
                   Everyone using this app will be able to see your video. Only upload videos you filmed or have permission to share.
                 </p>
               </div>
@@ -1544,34 +1706,41 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
 
             {panel === "friends" && friendsFor && (
               <div>
-                <div className="mb-4 flex items-center gap-3 rounded-2xl bg-white/5 p-3">
-                  {friendsFor.imageUrl && <img src={friendsFor.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />}
+                <div className="mb-4 flex items-center gap-3 rounded-2xl bg-gradient-to-br from-[#e9fbf4] to-[#e6f4fc] p-3">
+                  {friendsFor.imageUrl ? (
+                    <img src={friendsFor.imageUrl} alt="" className="h-12 w-12 rounded-xl object-cover" />
+                  ) : (
+                    <span className="grid h-12 w-12 place-items-center rounded-xl bg-white text-2xl">{emojiOf(friendsFor)}</span>
+                  )}
                   <div className="min-w-0">
-                    <p className="truncate font-bold">{friendsFor.name}</p>
-                    <p className="text-[10.5px] text-white/55">{friendsFor.restaurant}</p>
+                    <p className="truncate text-[14px] font-bold">{friendsFor.name}</p>
+                    <p className="text-[11px] text-[#5b7083]">{friendsFor.restaurant}</p>
                   </div>
                 </div>
                 <div className="space-y-2">
                   {(friendActivity[friendsFor.id] ?? []).map((a) => (
-                    <div key={a.name} className="flex items-center gap-3 rounded-xl bg-white/5 p-3">
+                    <div key={a.name} className="flex items-center gap-3 rounded-xl bg-[#f3f8fc] p-3">
                       <span
-                        className="grid h-10 w-10 place-items-center rounded-full text-[12px] font-bold"
-                        style={{ background: friendColor[a.name] ?? `hsl(${hueOf(a.name)} 50% 40%)` }}
+                        className="grid h-10 w-10 place-items-center rounded-full text-[12px] font-bold text-white"
+                        style={{ background: friendColor[a.name] ?? `hsl(${hueOf(a.name)} 50% 45%)` }}
                       >
                         {a.name[0]}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-[12px] font-bold">{a.name}</p>
-                        <p className="text-[10.5px] text-white/50">Ordered {a.when}</p>
+                        <p className="text-[12.5px] font-bold">{a.name}</p>
+                        <p className="text-[11px] text-[#5b7083]">Ordered {a.when}</p>
                       </div>
-                      <span className="text-[12px] text-[#ffd25e]">{stars(a.stars)}</span>
+                      <span className="text-[12px] text-[#f5b301]">{stars(a.stars)}</span>
                     </div>
                   ))}
                 </div>
-                <button onClick={() => openPanel("room")} className="mt-4 w-full rounded-xl bg-[#2de3a1] py-3 font-bold text-[#062a1c]">
+                <button
+                  onClick={() => openPanel("room")}
+                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] py-3 text-[13px] font-bold text-[#062a1c] shadow-[0_6px_18px_rgba(76,201,240,.35)]"
+                >
                   Order together
                 </button>
-                <p className="mt-4 text-center text-[9.5px] text-white/35">Sample friend activity for this prototype.</p>
+                <p className="mt-4 text-center text-[10px] text-[#7a8fa0]">Sample friend activity for this prototype.</p>
               </div>
             )}
 

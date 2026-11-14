@@ -27,6 +27,8 @@ export type UploadRecord = {
   cuisine: (typeof CUISINES)[number];
   description: string;
   ingredients: string[];
+  /* every dish shown in the video (the first is also `dish` / `price`) */
+  items?: { name: string; price: number }[];
   uploaderName?: string;
   createdAt: number;
   deleteToken: string;
@@ -105,6 +107,7 @@ export const publicView = (r: UploadRecord) => ({
   cuisine: r.cuisine,
   description: r.description,
   ingredients: r.ingredients,
+  items: r.items,
   uploaderName: r.uploaderName,
   createdAt: r.createdAt,
 });

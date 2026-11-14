@@ -26,14 +26,14 @@ button { cursor: pointer; }
 .clean .hud, .clean .hud * { pointer-events: none !important; }
 
 /* TikTok-style touches */
-.progress { position: absolute; left: 0; bottom: var(--nav-h); height: 3px; width: 0; background: #2de3a1; animation: progress 14s linear forwards; transition: bottom .25s ease; z-index: 5; pointer-events: none; }
-.clean .progress { bottom: 0; }
-.burst { animation: burst .85s ease-out forwards; }
+.clean .burst { animation: burst .85s ease-out forwards; }
 .phone-screen input, .phone-screen textarea { -webkit-user-select: text; user-select: text; }
 
-/* full-bleed TikTok video: a 9:16 clip is scaled to the screen height and centre-cropped to fit */
+/* TikTok video: fits the screen width and sits right on the progress line; the top 9% of the frame (TikTok's own name + logo) is cropped off */
 .cqbox { container-type: size; }
-.tt-cover { position: absolute; top: -13%; left: 50%; height: 118%; width: calc(118cqh * 9 / 16); transform: translateX(-50%); }
+.tt-cover { position: absolute; left: 0; bottom: var(--nav-h); width: 100%; height: calc(100cqw * 16 / 9 * .91); overflow: hidden; background: #000; transition: bottom .25s ease; }
+.tt-frame { position: absolute; left: 0; bottom: 0; width: 100%; height: calc(100cqw * 16 / 9); }
+.clean .tt-cover { bottom: 0; }
 
 /* a little personality */
 .ring { background: conic-gradient(from 0deg, #2de3a1, #ffe27a, #2de3a1); }
@@ -43,7 +43,6 @@ button { cursor: pointer; }
 @keyframes card-in { from { transform: translateY(28px); opacity: 0 } to { transform: none; opacity: 1 } }
 @keyframes fly { to { transform: translate(var(--dx), var(--dy)) scale(.3) rotate(25deg); opacity: .25 } }
 @keyframes bump { 30% { transform: scale(1.22) } 60% { transform: scale(.94) } }
-@keyframes progress { to { width: 100%; } }
 @keyframes burst { 0% { transform: scale(.3) rotate(var(--r)); opacity: 0 } 25% { transform: scale(1.15) rotate(var(--r)); opacity: 1 } 70% { transform: scale(1) rotate(var(--r)) translateY(-10px); opacity: 1 } 100% { transform: scale(1.1) rotate(var(--r)) translateY(-60px); opacity: 0 } }
 .grain::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .12; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E"); }
 @keyframes food-cam { from { transform: scale(1.02) translate3d(0,0,0) } to { transform: scale(1.11) translate3d(-1%, -1%, 0) } }
@@ -51,7 +50,7 @@ button { cursor: pointer; }
 @keyframes slide-up { from { transform: translateY(100%) } to { transform: translateY(0) } }
 .pop { animation: pop .32s ease-out; }
 .sheet { animation: slide-up .28s ease-out; }
-@media (prefers-reduced-motion: reduce) { .dish-photo, .food-clip, .pop, .sheet, .progress, .card-in, .fly, .bump { animation: none; } .progress { width: 100%; opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .dish-photo, .food-clip, .pop, .sheet, .card-in, .fly, .bump { animation: none; } }
 .desktop-stage { min-height: 100svh; position: relative; overflow: hidden; }
 .desktop-grid, .marketing-copy { display: none; }
 .desktop-inner, .phone-column { height: 100%; }
@@ -84,3 +83,12 @@ button { cursor: pointer; }
   .phone-hint { display: flex; align-items: center; gap: 8px; color: #6e6e6e; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .16em; }
   .phone-hint i { width: 6px; height: 6px; border-radius: 50%; background: #111; animation: pop 1.6s ease-in-out infinite; }
 }
+
+/* video position line: real length, white, click to jump */
+.seek { position: absolute; left: 0; right: 0; bottom: var(--nav-h); height: 20px; z-index: 6; cursor: pointer; transition: bottom .25s ease; }
+.seek::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(255,255,255,.3); }
+.seek-fill { position: absolute; left: 0; bottom: 0; height: 2px; background: #fff; pointer-events: none; }
+.seek-fill::after { content: ""; position: absolute; right: -3px; bottom: -2px; width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+.seek:hover::before, .seek:hover .seek-fill, .seek:active::before, .seek:active .seek-fill { height: 4px; }
+.seek:hover .seek-fill::after, .seek:active .seek-fill::after { bottom: -1px; width: 8px; height: 8px; right: -4px; }
+.clean .seek { bottom: 0; }

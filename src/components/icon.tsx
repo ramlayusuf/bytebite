@@ -23,7 +23,8 @@ export type IconName =
   | "volume"
   | "mute"
   | "minus"
-  | "eyeoff";
+  | "eyeoff"
+  | "eye";
 
 const paths: Record<IconName, React.ReactNode> = {
   heart: (
@@ -120,6 +121,12 @@ const paths: Record<IconName, React.ReactNode> = {
     </>
   ),
   minus: <path d="M5 12h14" />,
+  eye: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
   eyeoff: (
     <>
       <path d="M3 3l18 18" />

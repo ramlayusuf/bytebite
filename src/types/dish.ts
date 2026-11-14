@@ -13,6 +13,8 @@ export type Dish = {
   description: string;
   tags: string[];
   ingredients?: string[];
+  /* every dish shown in the video, when there is more than one (the first matches name/price) */
+  items?: { name: string; price: number }[];
   gridPosition: string;
   match: number;
   imageUrl?: string;
