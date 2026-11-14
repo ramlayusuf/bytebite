@@ -1,16 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
+import { TikTok_Sans } from "next/font/google";
 import "./globals.css";
 
-const geist = Geist({ variable: "--font-geist", subsets: ["latin"] });
+const tiktok = TikTok_Sans({ variable: "--font-tiktok", subsets: ["latin"], weight: "variable" });
 
 export const metadata: Metadata = {
   title: "Crave — food worth stopping for",
   description: "Swipe through dishes you can order on Careem right now.",
 };
 
-export const viewport: Viewport = { themeColor: "#07110d", width: "device-width", initialScale: 1, viewportFit: "cover" };
+export const viewport: Viewport = { themeColor: "#000000", width: "device-width", initialScale: 1, viewportFit: "cover" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  return <html lang="en" className={geist.variable}><body>{children}</body></html>;
+  return <html lang="en" className={tiktok.variable}><body>{children}</body></html>;
 }
