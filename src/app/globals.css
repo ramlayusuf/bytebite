@@ -2,7 +2,7 @@
 
 :root { --careem: #2de3a1; --ink: #07110d; }
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--ink); color: white; font-family: var(--font-geist), Arial, sans-serif; }
+html, body { margin: 0; background: var(--ink); color: white; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
 button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 .hide-scrollbar { scrollbar-width: none; }
@@ -12,17 +12,46 @@ button { cursor: pointer; }
 .dish-photo { background-image: url('/food/dish-grid.png'); background-size: 400% 200%; background-repeat: no-repeat; animation: food-cam 9s ease-in-out infinite alternate; }
 .food-clip { animation: food-cam 9s ease-in-out infinite alternate; }
 .review-embed { pointer-events: none; transform: scale(1.7); transform-origin: center; }
-.phone-screen button[class*="bg-[#092419]"] { display: none; }
-.feed-tabs button { position: relative; color: rgba(255,255,255,.55); text-shadow: 0 1px 8px rgba(0,0,0,.7); }
+/* text inside the phone must stay white even when the desktop body colour is dark */
+.phone-screen { -webkit-touch-callout: none; color: #fff; --nav-h: calc(50px + max(.25rem, env(safe-area-inset-bottom))); --top-h: calc(max(.75rem, env(safe-area-inset-top)) + 40px); }
+.top-bar { padding-top: max(.75rem, env(safe-area-inset-top)); }
+.tabbar { height: var(--nav-h); padding-bottom: max(.25rem, env(safe-area-inset-bottom)); }
+.feed-tabs button { position: relative; color: rgba(255,255,255,.6); text-shadow: 0 1px 8px rgba(0,0,0,.7); }
 .feed-tabs button.active { color: #fff; }
 .feed-tabs button.active::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 22px; height: 2px; border-radius: 999px; background: #fff; transform: translateX(-50%); }
+
+/* Clear display: tapping the video fades every overlay out; tapping again brings them back. */
+.hud { transition: opacity .25s ease; }
+.clean .hud { opacity: 0; }
+.clean .hud, .clean .hud * { pointer-events: none !important; }
+
+/* TikTok-style touches */
+.progress { position: absolute; left: 0; bottom: var(--nav-h); height: 3px; width: 0; background: #2de3a1; animation: progress 14s linear forwards; transition: bottom .25s ease; z-index: 5; pointer-events: none; }
+.clean .progress { bottom: 0; }
+.burst { animation: burst .85s ease-out forwards; }
+.phone-screen input, .phone-screen textarea { -webkit-user-select: text; user-select: text; }
+
+/* full-bleed TikTok video: a 9:16 clip is scaled to the screen height and centre-cropped to fit */
+.cqbox { container-type: size; }
+.tt-cover { position: absolute; top: -13%; left: 50%; height: 118%; width: calc(118cqh * 9 / 16); transform: translateX(-50%); }
+
+/* a little personality */
+.ring { background: conic-gradient(from 0deg, #2de3a1, #ffe27a, #2de3a1); }
+.card-in { animation: card-in .5s cubic-bezier(.2,.9,.3,1.15) both; }
+.fly { animation: fly .75s cubic-bezier(.45,0,.75,.35) forwards; }
+.bump { animation: bump .45s ease-out; }
+@keyframes card-in { from { transform: translateY(28px); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes fly { to { transform: translate(var(--dx), var(--dy)) scale(.3) rotate(25deg); opacity: .25 } }
+@keyframes bump { 30% { transform: scale(1.22) } 60% { transform: scale(.94) } }
+@keyframes progress { to { width: 100%; } }
+@keyframes burst { 0% { transform: scale(.3) rotate(var(--r)); opacity: 0 } 25% { transform: scale(1.15) rotate(var(--r)); opacity: 1 } 70% { transform: scale(1) rotate(var(--r)) translateY(-10px); opacity: 1 } 100% { transform: scale(1.1) rotate(var(--r)) translateY(-60px); opacity: 0 } }
 .grain::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .12; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.25'/%3E%3C/svg%3E"); }
 @keyframes food-cam { from { transform: scale(1.02) translate3d(0,0,0) } to { transform: scale(1.11) translate3d(-1%, -1%, 0) } }
 @keyframes pop { 0% { transform: scale(.75); opacity: 0 } 60% { transform: scale(1.08) } 100% { transform: scale(1); opacity: 1 } }
 @keyframes slide-up { from { transform: translateY(100%) } to { transform: translateY(0) } }
 .pop { animation: pop .32s ease-out; }
 .sheet { animation: slide-up .28s ease-out; }
-@media (prefers-reduced-motion: reduce) { .dish-photo, .pop, .sheet { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .dish-photo, .food-clip, .pop, .sheet, .progress, .card-in, .fly, .bump { animation: none; } .progress { width: 100%; opacity: .4; } }
 .desktop-stage { min-height: 100svh; position: relative; overflow: hidden; }
 .desktop-grid, .marketing-copy { display: none; }
 .desktop-inner, .phone-column { height: 100%; }
@@ -30,6 +59,9 @@ button { cursor: pointer; }
 .dynamic-island { display: none; }
 .phone-hint { display: none; }
 @media (min-width: 768px) {
+  /* keep the tabs clear of the fake notch on the desktop phone frame */
+  .phone-screen { --top-h: 90px; }
+  .top-bar { padding-top: 46px; }
   body { background: #f4f4f2; color: #0a0a0a; }
   .desktop-stage { height: 100svh; display: grid; place-items: center; background: #f4f4f2; padding: 16px; }
   .desktop-grid { display: block; position: absolute; inset: 0; background-image: linear-gradient(#e7e7e7 1px,transparent 1px),linear-gradient(90deg,#e7e7e7 1px,transparent 1px); background-size: 72px 72px; mask-image: radial-gradient(ellipse 90% 82% at 50% 45%,black 28%,transparent 76%); opacity: .52; }
@@ -46,8 +78,8 @@ button { cursor: pointer; }
   .desktop-meta b { font-size: 23px; letter-spacing: -.03em; }
   .desktop-meta small { margin-top: 4px; color: #777; text-transform: uppercase; letter-spacing: .13em; font-size: 9px; }
   .phone-column { display: grid; width: 100%; height: 100%; place-items: center; }
-  .phone-shell { width: min(calc((100svh - 32px) * 9 / 19),calc(100vw - 32px)); height: auto; max-height: calc(100svh - 32px); aspect-ratio: 9/19; border-radius: 44px; padding: 10px; background: #090909; box-shadow: 0 24px 70px rgba(10,10,10,.22),0 0 0 1px rgba(10,10,10,.08); }
-  .phone-screen { border-radius: 36px; }
+  .phone-shell { height: min(calc(100svh - 32px), calc((100vw - 32px) * 19 / 9)); width: auto; aspect-ratio: 9/19; overflow: hidden; border-radius: 44px; padding: 10px; background: #090909; box-shadow: 0 24px 70px rgba(10,10,10,.22),0 0 0 1px rgba(10,10,10,.08); }
+  .phone-screen { border-radius: 34px; }
   .dynamic-island { display: block; position: absolute; z-index: 80; top: 20px; left: 50%; width: 88px; height: 24px; transform: translateX(-50%); border-radius: 14px; background: #090909; box-shadow: 0 1px 0 rgba(255,255,255,.08); }
   .phone-hint { display: flex; align-items: center; gap: 8px; color: #6e6e6e; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .16em; }
   .phone-hint i { width: 6px; height: 6px; border-radius: 50%; background: #111; animation: pop 1.6s ease-in-out infinite; }

@@ -21,13 +21,27 @@ async function post(body: unknown, session?: string) {
   return { payload: unpack(await response.text()), session: response.headers.get("mcp-session-id") ?? session };
 }
 
-export async function callCareemTool(name: string, args: Record<string, unknown>) {
+async function openSession() {
   const initialized = await post({ jsonrpc: "2.0", id: rpcId++, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "careem-choice", version: "1.0.0" } } });
   if (!initialized.session) throw new Error("Careem MCP did not create a session");
   await post({ jsonrpc: "2.0", method: "notifications/initialized" }, initialized.session);
-  const called = await post({ jsonrpc: "2.0", id: rpcId++, method: "tools/call", params: { name, arguments: args } }, initialized.session);
+  return initialized.session;
+}
+
+export async function callCareemTool(name: string, args: Record<string, unknown>) {
+  const session = await openSession();
+  const called = await post({ jsonrpc: "2.0", id: rpcId++, method: "tools/call", params: { name, arguments: args } }, session);
   if (called.payload.error) throw new Error(called.payload.error.message);
   const result = called.payload.result;
   if (result?.isError) throw new Error(result.content?.[0]?.text ?? "Careem MCP tool failed");
   return result?.structuredContent ?? JSON.parse(result?.content?.[0]?.text ?? "null");
+}
+
+export type McpTool = { name: string; description?: string; inputSchema: Record<string, unknown> };
+
+export async function listCareemTools(): Promise<McpTool[]> {
+  const session = await openSession();
+  const listed = await post({ jsonrpc: "2.0", id: rpcId++, method: "tools/list" }, session);
+  if (listed.payload.error) throw new Error(listed.payload.error.message);
+  return listed.payload.result?.tools ?? [];
 }

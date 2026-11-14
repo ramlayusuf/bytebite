@@ -46,3 +46,9 @@ next-env.d.ts
 /careem-mcp-sandbox/
 /careem-mcp-typescript/dist/
 /careem-mcp-typescript/.run/
+
+# local symlink to the Careem MCP sandbox spec (not committed)
+/careem-mcp-sandbox
+
+# user-uploaded videos (local dev store)
+/.uploads

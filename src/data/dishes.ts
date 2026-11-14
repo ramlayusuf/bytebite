@@ -1,12 +1,67 @@
 import type { Dish } from "@/types/dish";
 
+/*
+ * Every dish below is backed by a real, public TikTok video (played through TikTok's embed player).
+ * `creatorHandle` is the account that posted it; `restaurantHandle` is the restaurant's own account.
+ * Where a price appears in the video's caption it is used as-is; the two marked "carried over" are
+ * placeholders from the earlier prototype and are not from the video.
+ * Ratings, review counts and delivery times are deliberately NOT set — no verified source for them.
+ */
 export const dishes: Dish[] = [
-  { id: "burger", name: "Bull Burger", restaurant: "Eleven Green", cuisine: "Burgers", price: 59, rating: 4.8, reviews: "2.4k", deliveryMinutes: 24, description: "Wagyu beef, cheddar, house beef bacon jam and Eleven Green's signature bull sauce.", tags: ["Award winner", "Creator review"], gridPosition: "0% 0%", imageUrl: "/food/dishes/burger.jpg", embedUrl: "https://www.instagram.com/p/DMpv8DdoJg3/embed/", reviewUrl: "https://www.instagram.com/p/DMpv8DdoJg3/", reviewCreator: "Public restaurant review", reviewPlatform: "Instagram", match: 96 },
-  { id: "shawarma", name: "Chicken Shawarma Plate", restaurant: "Allo Beirut", cuisine: "Arabic", price: 38, rating: 4.7, reviews: "5.1k", deliveryMinutes: 19, description: "Charcoal chicken, silky hummus, pickles and warm saj straight from the oven.", tags: ["Popular near you"], gridPosition: "33.333% 0%", imageUrl: "/food/dishes/shawarma.jpg", match: 93 },
-  { id: "sushi", name: "Spicy Salmon Crunch", restaurant: "3Fils", cuisine: "Japanese", price: 56, rating: 4.9, reviews: "1.8k", deliveryMinutes: 31, description: "Salmon, avocado and cucumber topped with spicy mayo and crisp tempura.", tags: ["Chef's pick", "Creator review"], gridPosition: "66.666% 0%", imageUrl: "/food/dishes/sushi.jpg", embedUrl: "https://www.youtube.com/embed/FlxGZZRQp4w?autoplay=1&mute=1&controls=0&loop=1&playlist=FlxGZZRQp4w&playsinline=1&modestbranding=1", reviewUrl: "https://www.youtube.com/watch?v=FlxGZZRQp4w", reviewCreator: "Ever List", reviewPlatform: "YouTube", match: 91 },
-  { id: "pasta", name: "Truffle Tagliatelle", restaurant: "L'Antica Pizzeria", cuisine: "Italian", price: 62, rating: 4.7, reviews: "982", deliveryMinutes: 28, description: "Fresh ribbons of pasta, wild mushrooms, parmesan and black truffle cream.", tags: ["Only on Careem"], gridPosition: "100% 0%", imageUrl: "/food/dishes/pasta.jpg", match: 89 },
-  { id: "bao", name: "Crispy Chicken Bao", restaurant: "Kinoya", cuisine: "Asian", price: 44, rating: 4.8, reviews: "1.2k", deliveryMinutes: 26, description: "Cloud-soft bao, crunchy chicken, sesame slaw and a bright chilli glaze.", tags: ["Trending"], gridPosition: "0% 100%", imageUrl: "/food/dishes/bao.jpg", match: 87 },
-  { id: "pizza", name: "Margherita 10\"", restaurant: "Pitfire Pizza", cuisine: "Italian", price: 60, rating: 4.9, reviews: "1.8k", deliveryMinutes: 45, description: "Seasoned tomato sauce, hand-torn mozzarella, olive oil, parmesan and fresh basil.", tags: ["Careem bestseller", "Behind the scenes"], gridPosition: "33.333% 100%", imageUrl: "/food/dishes/pizza.jpg", embedUrl: "https://www.youtube.com/embed/A98TRmDOG70?autoplay=1&mute=1&controls=0&loop=1&playlist=A98TRmDOG70&playsinline=1&modestbranding=1", reviewUrl: "https://www.youtube.com/watch?v=A98TRmDOG70", reviewCreator: "The Cyrus Show", reviewPlatform: "YouTube", match: 85 },
-  { id: "biryani", name: "Murgh Hyderabadi Biryani", restaurant: "Gazebo", cuisine: "Indian", price: 47, rating: 4.8, reviews: "2.4k", deliveryMinutes: 33, description: "Chicken marinated in Hyderabadi masala, layered with aromatic basmati and cooked on dum.", tags: ["2.4M-view review", "On Careem"], gridPosition: "66.666% 100%", imageUrl: "/food/dishes/biryani.jpg", embedUrl: "https://www.youtube.com/embed/QZY46IdNEis?autoplay=1&mute=1&controls=0&loop=1&playlist=QZY46IdNEis&playsinline=1&modestbranding=1", reviewUrl: "https://www.youtube.com/watch?v=QZY46IdNEis", reviewCreator: "Tizzjuno", reviewPlatform: "YouTube", match: 82 },
-  { id: "kunafa", name: "Kunafa Naama with Cheese", restaurant: "Feras Sweets", cuisine: "Dessert", price: 32, rating: 4.7, reviews: "437", deliveryMinutes: 30, description: "Soft kunafa dough, cheese, pure butter ghee, sugar syrup and pistachios.", tags: ["Creator review", "On Careem"], gridPosition: "100% 100%", imageUrl: "/food/dishes/kunafa.jpg", embedUrl: "https://www.youtube.com/embed/vb7-7wRCM7c?autoplay=1&mute=1&controls=0&loop=1&playlist=vb7-7wRCM7c&playsinline=1&modestbranding=1", reviewUrl: "https://www.youtube.com/watch?v=vb7-7wRCM7c", reviewCreator: "The Food Monster", reviewPlatform: "YouTube", match: 79 },
+  {
+    id: "burger", name: "Bull Burger", restaurant: "Eleven Green", cuisine: "Burgers", price: 61,
+    description: "The award-winning burger from Eleven Green at Meyan Mall, Jumeirah. Sells out most days.",
+    tags: ["Award winner"], ingredients: ["Beef patty", "Cheese", "Signature sauce"], gridPosition: "0% 0%",
+    imageUrl: "/food/dishes/burger.jpg", match: 96,
+    tiktokId: "7417809228460477704", creatorHandle: "thedubailist", restaurantHandle: "elevengreen.uae",
+    reviewUrl: "https://www.tiktok.com/@thedubailist/video/7417809228460477704", reviewCreator: "thedubailist", reviewPlatform: "TikTok",
+  },
+  {
+    id: "shawarma", name: "Shawarma", restaurant: "Allo Beirut", cuisine: "Arabic", price: 38, /* price carried over */
+    description: "Lebanese street-food shawarma straight from Allo Beirut's own kitchen in Dubai.",
+    tags: ["From the restaurant"], ingredients: ["Shawarma", "Lebanese street food"], gridPosition: "33.333% 0%",
+    imageUrl: "/food/dishes/shawarma.jpg", match: 93,
+    tiktokId: "7020360146182262018", creatorHandle: "allobeirutstreetfood", restaurantHandle: "allobeirutstreetfood",
+    reviewUrl: "https://www.tiktok.com/@allobeirutstreetfood/video/7020360146182262018", reviewCreator: "allobeirutstreetfood", reviewPlatform: "TikTok",
+  },
+  {
+    id: "sushi", name: "Oshi Pressed Sushi", restaurant: "Soy Fish", cuisine: "Japanese", price: 45,
+    description: "Pressed sushi (oshi), AED 45–60 each. Seared salmon and wagyu are the favourites. Delivery only, on Careem.",
+    tags: ["On Careem"], ingredients: ["Seared salmon", "Wagyu", "Spicy tuna"], gridPosition: "66.666% 0%",
+    imageUrl: "/food/dishes/sushi.jpg", match: 91,
+    tiktokId: "7347354701806980382", creatorHandle: "justfooddxb", restaurantHandle: "soyfishdxb",
+    reviewUrl: "https://www.tiktok.com/@justfooddxb/video/7347354701806980382", reviewCreator: "justfooddxb", reviewPlatform: "TikTok",
+  },
+  {
+    id: "pasta", name: "White Truffle Pasta with Shrimp", restaurant: "Parker's, Dubai Mall", cuisine: "Italian", price: 105,
+    description: "A French-with-a-twist take on truffle pasta at Parker's in The Dubai Mall.",
+    tags: ["Dubai Mall"], ingredients: ["White truffle", "Pasta", "Shrimp"], gridPosition: "100% 0%",
+    imageUrl: "/food/dishes/pasta.jpg", match: 89,
+    tiktokId: "7304678365758246176", creatorHandle: "unkleeats",
+    reviewUrl: "https://www.tiktok.com/@unkleeats/video/7304678365758246176", reviewCreator: "unkleeats", reviewPlatform: "TikTok",
+  },
+  {
+    id: "pizza", name: "Pitfire Pizza", restaurant: "Pitfire Pizza", cuisine: "Italian", price: 60, /* price carried over */
+    description: "Straight from Pitfire's own kitchen: pizza made to order, delivered across Dubai.",
+    tags: ["From the restaurant"], gridPosition: "33.333% 100%",
+    imageUrl: "/food/dishes/pizza.jpg", match: 85,
+    tiktokId: "7288656076919164168", creatorHandle: "pitfirepizzabakers", restaurantHandle: "pitfirepizzabakers",
+    reviewUrl: "https://www.tiktok.com/@pitfirepizzabakers/video/7288656076919164168", reviewCreator: "pitfirepizzabakers", reviewPlatform: "TikTok",
+  },
+  {
+    id: "biryani", name: "Classic Murgh Badami Tang / Kabab Biryani", restaurant: "Gazebo", cuisine: "Indian", price: 52,
+    description: "Gazebo's chicken biryani, from one of Dubai's longest-running Indian restaurants.",
+    tags: ["Dubai classic"], ingredients: ["Chicken", "Kabab", "Rice"], gridPosition: "66.666% 100%",
+    imageUrl: "/food/dishes/biryani.jpg", match: 82,
+    tiktokId: "7297128792785554689", creatorHandle: "feedkiani", restaurantHandle: "gazeborestaurant",
+    reviewUrl: "https://www.tiktok.com/@feedkiani/video/7297128792785554689", reviewCreator: "feedkiani", reviewPlatform: "TikTok",
+  },
+  {
+    id: "kunafa", name: "Charcoal Knafeh Na'ameh", restaurant: "Omar Odali, Keturah Reserve", cuisine: "Dessert", price: 30,
+    description: "Palestinian-owned. Knafeh cooked directly on charcoal for a caramelised crust and a proper cheese pull.",
+    tags: ["Palestinian-owned"], ingredients: ["Kunafa", "Cheese"], gridPosition: "100% 100%",
+    imageUrl: "/food/dishes/kunafa.jpg", match: 79,
+    tiktokId: "7345019323762609426", creatorHandle: "tableeforone",
+    reviewUrl: "https://www.tiktok.com/@tableeforone/video/7345019323762609426", reviewCreator: "tableeforone", reviewPlatform: "TikTok",
+  },
 ];

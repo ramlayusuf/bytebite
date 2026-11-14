@@ -1,15 +1,8 @@
 import "server-only";
 import { BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
+import { localIntent, type Intent } from "./local-intent";
 
-export type Intent = { query: string; budget: number; maxMinutes: number; priorities: string[]; source: "bedrock" | "local" };
-
-function localIntent(prompt: string): Intent {
-  const lower = prompt.toLowerCase();
-  const amount = prompt.match(/(?:aed|dh|dhs)?\s*(\d{2,3})|(?:under|budget|max)\s*(?:aed)?\s*(\d{2,3})/i);
-  const minutes = prompt.match(/(\d{2})\s*(?:min|minute)/i);
-  const query = /pizza/.test(lower) ? "pizza" : /sushi|japanese/.test(lower) ? "sushi" : /breakfast|syrniki/.test(lower) ? "breakfast" : /bowl|healthy|salad/.test(lower) ? "bowl" : /shawarma|arabic/.test(lower) ? "shawarma" : "chicken";
-  return { query, budget: +(amount?.[1] ?? amount?.[2] ?? 45), maxMinutes: +(minutes?.[1] ?? 30), priorities: [lower.includes("protein") ? "high protein" : "taste match", "budget fit", "fast delivery"], source: "local" };
-}
+export type { Intent } from "./local-intent";
 
 export async function understandIntent(prompt: string): Promise<Intent> {
   if (!process.env.AWS_PROFILE && !process.env.AWS_ACCESS_KEY_ID) return localIntent(prompt);

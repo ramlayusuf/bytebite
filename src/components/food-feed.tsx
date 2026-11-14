@@ -1,118 +1,215 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- feed media arrives from runtime Careem MCP responses and user uploads. */
+/* eslint-disable @next/next/no-img-element -- media comes from TikTok, uploads and local files, not next/image. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Dish } from "@/types/dish";
-import {
-  applyTasteSignal,
-  emptyTasteProfile,
-  rankDishes,
-  tasteReason,
-  tasteScore,
-  type TasteProfile,
-  type TasteSignal,
-} from "@/lib/recommendations";
+import type { Cuisine, Dish } from "@/types/dish";
+import { reviews as sampleReviews, type Review } from "@/data/reviews";
+import { applyTasteSignal, emptyTasteProfile, rankDishes, type TasteProfile, type TasteSignal } from "@/lib/recommendations";
+import { Icon, type IconName } from "./icon";
+import { SplitVote, TogetherPanel } from "./group-order";
 
-type IconName =
-  | "heart"
-  | "bookmark"
-  | "share"
-  | "bag"
-  | "close"
-  | "spark"
-  | "camera"
-  | "users"
-  | "home"
-  | "chat"
-  | "card"
-  | "send";
-type Panel = "basket" | "camera" | "room" | "chat" | "profile" | null;
+type Panel = "basket" | "hitlist" | "search" | "camera" | "room" | "reviews" | "friends" | "chat" | "upload" | null;
+type Mode = "following" | "for-you";
+type Flight = { id: number; x: number; y: number; dx: number; dy: number; img?: string };
+type ChatMsg = { role: "user" | "assistant"; content: string; tools?: string[]; dishIds?: string[]; mode?: string };
+type UploadMeta = {
+  id: string;
+  hasPoster: boolean;
+  uploaderType: "restaurant" | "customer";
+  restaurant: string;
+  dish: string;
+  price: number;
+  cuisine: Cuisine;
+  description: string;
+  ingredients: string[];
+  uploaderName?: string;
+};
 
-function Icon({
-  name,
-  filled = false,
-  size = 24,
+/* ---------- small helpers ---------- */
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+const handleOf = (d: Dish) => "@" + (d.creatorHandle ?? slug(d.restaurant));
+const ownAccount = (d: Dish) => d.uploadedBy === "restaurant" || (!!d.creatorHandle && d.creatorHandle === d.restaurantHandle);
+const hueOf = (s: string) => [...s].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+const stars = (n: number) => "★".repeat(n) + "☆".repeat(5 - n);
+const emojiOf = (d: Dish) =>
+  (({ pizza: "🍕", burger: "🍔", sushi: "🍣", pasta: "🍝", shawarma: "🥙", biryani: "🍛", kunafa: "🍮" }) as Record<string, string>)[d.id] ?? "🍽️";
+const CUISINE_OPTIONS: Cuisine[] = ["Burgers", "Arabic", "Japanese", "Italian", "Asian", "Indian", "Dessert", "Other"];
+
+const toDish = (u: UploadMeta): Dish => ({
+  id: `up-${u.id}`,
+  uploadId: u.id,
+  uploadedBy: u.uploaderType,
+  name: u.dish,
+  restaurant: u.restaurant,
+  cuisine: u.cuisine,
+  price: u.price,
+  description: u.description || `${u.dish} from ${u.restaurant}.`,
+  tags: [u.uploaderType === "restaurant" ? "Posted by the restaurant" : "Posted by a customer"],
+  ingredients: u.ingredients,
+  gridPosition: "0% 0%",
+  match: 85,
+  imageUrl: u.hasPoster ? `/api/uploads/${u.id}/poster` : undefined,
+  videoUrl: `/api/uploads/${u.id}/video`,
+  creatorHandle: slug(u.uploaderType === "restaurant" ? u.restaurant : u.uploaderName || "customer") || "crave",
+  restaurantHandle: u.uploaderType === "restaurant" ? slug(u.restaurant) : undefined,
+});
+
+/* grab a still frame from a chosen video to use as its thumbnail */
+function makePoster(url: string): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    v.src = url;
+    const finish = (blob: Blob | null) => {
+      clearTimeout(timer);
+      v.removeAttribute("src");
+      v.load();
+      resolve(blob);
+    };
+    const timer = setTimeout(() => finish(null), 6000);
+    v.onloadeddata = () => {
+      v.currentTime = Math.min(1, (v.duration || 2) / 2);
+    };
+    v.onseeked = () => {
+      const w = Math.min(480, v.videoWidth || 480);
+      const h = Math.round((w * (v.videoHeight || 640)) / (v.videoWidth || 480));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return finish(null);
+      ctx.drawImage(v, 0, 0, w, h);
+      canvas.toBlob((b) => finish(b), "image/jpeg", 0.8);
+    };
+    v.onerror = () => finish(null);
+  });
+}
+
+/* Prototype data: friend activity per dish (Bitesight-style social proof). */
+const friendActivity: Record<string, { name: string; when: string; stars: number }[]> = {
+  burger: [{ name: "Reem", when: "2 days ago", stars: 5 }],
+  shawarma: [
+    { name: "Mohammed", when: "Yesterday", stars: 5 },
+    { name: "Reem", when: "1 week ago", stars: 4 },
+  ],
+  sushi: [{ name: "Reem", when: "3 days ago", stars: 5 }],
+  pizza: [
+    { name: "Reem", when: "Yesterday", stars: 5 },
+    { name: "Mohammed", when: "2 weeks ago", stars: 5 },
+  ],
+  kunafa: [{ name: "Mohammed", when: "4 days ago", stars: 5 }],
+};
+const friendColor: Record<string, string> = { Reem: "#5844d8", Mohammed: "#ef755b" };
+
+/* Bitesight-style intent search: craving chips instead of category lists. */
+const cravings: { label: string; test: (d: Dish) => boolean }[] = [
+  { label: "Something cheesy", test: (d) => /chees|mozzarella|parmesan|cheddar/i.test(`${d.description} ${(d.ingredients ?? []).join(" ")}`) },
+  { label: "Healthy lunch", test: (d) => ["Japanese", "Arabic", "Asian"].includes(d.cuisine) },
+  { label: "Under AED 45", test: (d) => d.price <= 45 },
+  { label: "Sweet tooth", test: (d) => d.cuisine === "Dessert" },
+  { label: "Comfort food", test: (d) => ["Burgers", "Italian", "Indian"].includes(d.cuisine) },
+];
+const chatSuggestions = ["What's good for AED 45?", "I want something cheesy in 25 minutes", "Chicken under AED 50"];
+
+const panelTitle: Record<Exclude<Panel, null>, string> = {
+  basket: "Your bag",
+  hitlist: "Your hit list",
+  search: "What are you craving?",
+  camera: "See it. Find it.",
+  room: "Eat together",
+  reviews: "Reviews",
+  friends: "Who ordered this",
+  chat: "Ask Crave",
+  upload: "Share a dish",
+};
+
+/* ---------- pieces ---------- */
+
+const TIKTOK_PARAMS =
+  "controls=0&autoplay=1&loop=1&muted=1&music_info=0&description=0&rel=0&native_context_menu=0&closed_caption=0&play_button=0&progress_bar=0&volume_control=0&fullscreen_button=0&timestamp=0";
+
+function Media({
+  dish,
+  live,
+  sound,
+  failed,
+  frameRef,
+  videoRef,
+  onFrameLoad,
 }: {
-  name: IconName;
-  filled?: boolean;
-  size?: number;
+  dish: Dish;
+  live: boolean;
+  sound: boolean;
+  failed: boolean;
+  frameRef: React.RefObject<HTMLIFrameElement | null>;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  onFrameLoad: () => void;
 }) {
-  const paths: Record<IconName, React.ReactNode> = {
-    heart: (
-      <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21.2l7.8-7.7 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z" />
-    ),
-    bookmark: <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />,
-    share: (
+  const poster = dish.imageUrl ? (
+    <img src={dish.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+  ) : (
+    <div className="absolute inset-0 bg-[#0b1a13]" />
+  );
+  if (dish.tiktokId)
+    return (
       <>
-        <circle cx="18" cy="5" r="3" />
-        <circle cx="6" cy="12" r="3" />
-        <circle cx="18" cy="19" r="3" />
-        <path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" />
+        {poster}
+        {live && !failed && (
+          <iframe
+            ref={frameRef}
+            onLoad={onFrameLoad}
+            src={`https://www.tiktok.com/player/v1/${dish.tiktokId}?${TIKTOK_PARAMS}`}
+            title={`${dish.name} on TikTok`}
+            allow="autoplay; encrypted-media; picture-in-picture"
+            className="tt-cover pointer-events-none border-0"
+          />
+        )}
+        {live && failed && (
+          <div className="absolute left-1/2 top-[44%] z-10 w-[78%] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-black/70 p-4 text-center backdrop-blur-md">
+            <p className="text-[12px] font-bold">TikTok won&apos;t play this video here</p>
+            <p className="mt-1 text-[10.5px] text-white/60">It may be private or removed, or embedding is turned off.</p>
+            {dish.reviewUrl && (
+              <a
+                href={dish.reviewUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-block rounded-full bg-white px-4 py-2 text-[10.5px] font-bold text-[#062a1c]"
+              >
+                Watch on TikTok ↗
+              </a>
+            )}
+          </div>
+        )}
       </>
-    ),
-    bag: (
+    );
+  if (dish.videoUrl)
+    return (
       <>
-        <path d="M5 8h14l-1 13H6L5 8Z" />
-        <path d="M9 9V6a3 3 0 0 1 6 0v3" />
+        {poster}
+        {live && (
+          <video
+            ref={videoRef}
+            src={dish.videoUrl}
+            poster={dish.imageUrl}
+            autoPlay
+            loop
+            playsInline
+            muted={!sound}
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        )}
       </>
-    ),
-    close: <path d="m6 6 12 12M18 6 6 18" />,
-    spark: (
-      <path d="m12 2 1.6 5.1L19 9l-5.4 1.9L12 16l-1.6-5.1L5 9l5.4-1.9L12 2Zm7 13 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" />
-    ),
-    camera: (
-      <>
-        <rect x="3" y="6" width="18" height="14" rx="2" />
-        <path d="m8 6 1.5-2h5L16 6" />
-        <circle cx="12" cy="13" r="4" />
-      </>
-    ),
-    users: (
-      <>
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8" />
-      </>
-    ),
-    home: (
-      <>
-        <path d="m3 11 9-8 9 8" />
-        <path d="M5 10v11h14V10M9 21v-7h6v7" />
-      </>
-    ),
-    chat: (
-      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
-    ),
-    card: (
-      <>
-        <rect x="2" y="5" width="20" height="14" rx="2" />
-        <path d="M2 10h20" />
-      </>
-    ),
-    send: (
-      <>
-        <path d="m22 2-7 20-4-9-9-4Z" />
-        <path d="M22 2 11 13" />
-      </>
-    ),
-  };
+    );
+  if (dish.imageUrl) return <img src={dish.imageUrl} alt="" className="food-clip absolute inset-0 h-full w-full object-cover" />;
   return (
-    <svg
-      aria-hidden
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill={filled ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {paths[name]}
-    </svg>
+    <div role="img" aria-label={dish.name} className="dish-photo absolute inset-0" style={{ backgroundPosition: dish.gridPosition }} />
   );
 }
-function Action({
+
+function RailButton({
   label,
   icon,
   active,
@@ -127,984 +224,1506 @@ function Action({
     <button
       aria-label={label}
       onClick={onClick}
-      className={`group flex flex-col items-center gap-1 text-[11px] font-semibold ${active ? "text-[#2de3a1]" : "text-white"}`}
+      className="pointer-events-auto flex flex-col items-center gap-0.5 text-[9px] font-bold text-white"
+      style={{ textShadow: "0 1px 6px rgba(0,0,0,.6)" }}
     >
       <span
-        className={`grid h-12 w-12 place-items-center rounded-full border backdrop-blur-md transition active:scale-90 ${active ? "border-[#2de3a1]/70 bg-[#2de3a1]/20" : "border-white/20 bg-black/35 group-hover:bg-white/20"}`}
+        className="grid h-9 w-9 place-items-center transition active:scale-75"
+        style={{ color: active ? "#2de3a1" : "#fff", filter: "drop-shadow(0 1px 4px rgba(0,0,0,.55))" }}
       >
-        <Icon name={icon} filled={active} />
+        <Icon name={icon} filled={active} size={27} />
       </span>
       {label}
     </button>
   );
 }
-function Media({ dish }: { dish: Dish }) {
-  if (dish.embedUrl)
-    return (
-      <>
-        <img
-          src={dish.imageUrl}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-        <iframe
-          src={dish.embedUrl}
-          title={`${dish.restaurant} review by ${dish.reviewCreator}`}
-          allow="autoplay; encrypted-media; picture-in-picture"
-          className="review-embed absolute inset-0 h-full w-full border-0"
-        />
-      </>
-    );
-  if (dish.videoUrl)
-    return (
-      <video
-        src={dish.videoUrl}
-        autoPlay
-        muted
-        loop
-        playsInline
-        className="absolute inset-0 h-full w-full object-cover"
-      />
-    );
-  if (dish.imageUrl)
-    return (
-      <img
-        src={dish.imageUrl}
-        alt=""
-        className="food-clip absolute inset-0 h-full w-full object-cover"
-      />
-    );
+
+function MenuRow({ icon, title, sub, onClick }: { icon: IconName; title: string; sub: string; onClick: () => void }) {
   return (
-    <div
-      role="img"
-      aria-label={dish.name}
-      className="dish-photo absolute inset-0"
-      style={{ backgroundPosition: dish.gridPosition }}
-    />
+    <button onClick={onClick} className="flex w-full items-center gap-3 rounded-xl p-3 text-left active:bg-white/10">
+      <span className="grid h-10 w-10 place-items-center rounded-full bg-white/10">
+        <Icon name={icon} size={19} />
+      </span>
+      <span>
+        <strong className="block text-[13px]">{title}</strong>
+        <small className="text-white/50">{sub}</small>
+      </span>
+    </button>
   );
 }
 
-function TogetherPanel({
-  baseDish,
-  onCreateCart,
-}: {
-  baseDish: Dish;
-  onCreateCart: (items: Dish[]) => void;
-}) {
-  const [room, setRoom] = useState(false);
-  const [card, setCard] = useState(0);
-  const [matched, setMatched] = useState(false);
-  const [motion, setMotion] = useState<"yes" | "no" | null>(null);
-  const [dragX, setDragX] = useState(0);
-  const dragStart = useRef<number | null>(null);
-  const choices: Dish[] = [
-    baseDish,
-    {
-      ...baseDish,
-      id: "group-burger-reem",
-      name: "Spicy Jam Burger",
-      price: 62,
-    },
-    {
-      ...baseDish,
-      id: "group-burger-mohammed",
-      name: "Double Bull Burger",
-      price: 74,
-    },
-  ];
-  const vote = (yes: boolean) => {
-    setMotion(yes ? "yes" : "no");
-    setTimeout(() => {
-      setMotion(null);
-      if (yes) setMatched(true);
-      else setCard((card + 1) % choices.length);
-    }, 260);
-  };
-  const releaseCard = () => {
-    if (dragStart.current === null) return;
-    dragStart.current = null;
-    if (Math.abs(dragX) >= 70) vote(dragX > 0);
-    setDragX(0);
-  };
-
-  if (!room)
-    return (
-      <div>
-        <div className="mb-4 flex -space-x-2">
-          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-[#5844d8] font-black">
-            R
-          </span>
-          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-[#ef755b] font-black">
-            M
-          </span>
-          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-white/10 text-white/40">
-            +3
-          </span>
-        </div>
-        <p className="mb-5 text-sm leading-6 text-white/60">
-          Everyone swipes privately. A match happens when the group chooses
-          dishes from the same restaurant.
-        </p>
-        <button
-          onClick={() => setRoom(true)}
-          className="w-full rounded-xl bg-[#2de3a1] py-3 font-black text-[#07110d]"
-        >
-          Create room · BYTE42
-        </button>
-      </div>
-    );
-
-  if (matched)
-    return (
-      <div>
-        <div className="text-center">
-          <p className="text-xs font-bold text-[#2de3a1]">RESTAURANT MATCH</p>
-          <h3 className="mt-1 text-2xl font-black">
-            Everyone chose Eleven Green
-          </h3>
-          <p className="mt-2 text-sm text-white/55">
-            One restaurant, three dishes, one shared delivery.
-          </p>
-        </div>
-        <div className="mt-4 space-y-2">
-          {choices.map((dish, index) => (
-            <div
-              key={dish.id}
-              className="flex items-center gap-3 rounded-xl bg-white/5 p-2"
-            >
-              <img
-                src={dish.imageUrl}
-                alt=""
-                className="h-12 w-12 rounded-lg object-cover"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold">{dish.name}</p>
-                <p className="text-xs text-white/45">
-                  {["You", "Reem", "Mohammed"][index]} · AED {dish.price}
-                </p>
-              </div>
-              <span className="text-[#2de3a1]">✓</span>
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={() => onCreateCart(choices)}
-          className="mt-5 w-full rounded-xl bg-[#2de3a1] py-3 font-black text-[#07110d]"
-        >
-          Create shared cart · AED{" "}
-          {choices.reduce((sum, dish) => sum + dish.price, 0)}
-        </button>
-      </div>
-    );
-
-  const dish = choices[card];
+function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div>
-      <div className="mb-3 flex items-center justify-between text-xs">
-        <span className="font-bold text-[#2de3a1]">ROOM BYTE42</span>
-        <span className="text-white/45">
-          {card + 1} of {choices.length}
-        </span>
-      </div>
-      <div
-        onPointerDown={(event) => {
-          dragStart.current = event.clientX;
-          event.currentTarget.setPointerCapture(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          if (dragStart.current !== null)
-            setDragX(event.clientX - dragStart.current);
-        }}
-        onPointerUp={releaseCard}
-        onPointerCancel={releaseCard}
-        style={
-          motion
-            ? undefined
-            : { transform: `translateX(${dragX}px) rotate(${dragX / 18}deg)` }
-        }
-        className={`relative touch-none cursor-grab overflow-hidden rounded-[24px] bg-white/5 transition duration-300 active:cursor-grabbing ${motion === "yes" ? "translate-x-full rotate-12 opacity-0" : motion === "no" ? "-translate-x-full -rotate-12 opacity-0" : ""}`}
+    <div className="absolute inset-0 z-50 bg-black/60" onClick={onClose}>
+      <aside
+        onClick={(e) => e.stopPropagation()}
+        className="sheet absolute inset-x-0 bottom-0 max-h-[88%] overflow-auto rounded-t-[20px] bg-[#102019] px-4 pb-8 pt-2 shadow-2xl"
       >
-        <img
-          src={dish.imageUrl}
-          alt={dish.name}
-          className="h-72 w-full select-none object-cover"
-          draggable={false}
-        />
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent p-5 pt-20">
-          <p className="text-xs font-bold text-[#2de3a1]">{dish.restaurant}</p>
-          <h3 className="text-2xl font-black">{dish.name}</h3>
-          <p className="mt-1 text-sm text-white/65">
-            AED {dish.price} · {dish.deliveryMinutes} min
-          </p>
+        <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-white/20" />
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-[15px] font-bold">{title}</h2>
+          <button onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-full bg-white/10">
+            <Icon name="close" size={16} />
+          </button>
         </div>
-        {(motion || Math.abs(dragX) > 35) && (
-          <span
-            className={`absolute top-5 rounded-lg border-4 px-3 py-1 text-2xl font-black ${motion === "yes" || (!motion && dragX > 0) ? "left-5 -rotate-12 border-[#2de3a1] text-[#2de3a1]" : "right-5 rotate-12 border-red-400 text-red-400"}`}
-          >
-            {motion === "yes" || (!motion && dragX > 0) ? "YES" : "NOPE"}
-          </span>
-        )}
-      </div>
-      <div className="mt-5 flex justify-center gap-6">
-        <button
-          onClick={() => vote(false)}
-          aria-label="No"
-          className="grid h-16 w-16 place-items-center rounded-full border border-red-400/40 bg-red-400/10 text-red-300"
-        >
-          <Icon name="close" size={28} />
-        </button>
-        <button
-          onClick={() => vote(true)}
-          aria-label="Yes"
-          className="grid h-16 w-16 place-items-center rounded-full bg-[#2de3a1] text-[#07110d]"
-        >
-          <Icon name="heart" filled size={28} />
-        </button>
-      </div>
-      <p className="mt-3 text-center text-xs text-white/40">
-        Swipe privately · friends cannot see your votes
-      </p>
+        {children}
+      </aside>
     </div>
   );
 }
 
-type SplitChoice = "equal" | "dish";
+const inputClass = "h-10 w-full min-w-0 rounded-lg bg-white/10 px-3 text-[12px] outline-none placeholder:text-white/35";
 
-function SplitVote({
-  basket,
-  total,
-  onComplete,
-}: {
-  basket: Dish[];
-  total: number;
-  onComplete: () => void;
-}) {
-  const members = ["You", "Reem", "Mohammed"];
-  const [votes, setVotes] = useState<Record<string, SplitChoice | null>>({
-    You: null,
-    Reem: "equal",
-    Mohammed: "dish",
-  });
-  const equalVotes = Object.values(votes).filter(
-    (vote) => vote === "equal",
-  ).length;
-  const dishVotes = Object.values(votes).filter(
-    (vote) => vote === "dish",
-  ).length;
-  const unanimous: SplitChoice | null =
-    equalVotes === 3 ? "equal" : dishVotes === 3 ? "dish" : null;
-  const castVote = (choice: SplitChoice) => {
-    setVotes((current) => ({ ...current, You: choice }));
-    setTimeout(
-      () => setVotes((current) => ({ ...current, Reem: choice })),
-      700,
-    );
-    setTimeout(
-      () => setVotes((current) => ({ ...current, Mohammed: choice })),
-      1400,
-    );
-  };
-
-  return (
-    <div className="pop mt-4 rounded-2xl bg-white p-4 text-[#07110d]">
-      <p className="text-xs font-bold text-[#087f5b]">GROUP VOTE</p>
-      <h3 className="mt-1 text-lg font-black">How should we split it?</h3>
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <button
-          onClick={() => castVote("equal")}
-          className={`rounded-xl border p-3 text-left ${votes.You === "equal" ? "border-[#087f5b] bg-[#e6fff5]" : "border-black/10"}`}
-        >
-          <strong className="block text-sm">Split equally</strong>
-          <span className="text-xs text-black/50">
-            AED {(total / 3).toFixed(2)} each
-          </span>
-          <span className="mt-2 block text-xs font-black text-[#087f5b]">
-            {equalVotes} vote{equalVotes === 1 ? "" : "s"}
-          </span>
-        </button>
-        <button
-          onClick={() => castVote("dish")}
-          className={`rounded-xl border p-3 text-left ${votes.You === "dish" ? "border-[#087f5b] bg-[#e6fff5]" : "border-black/10"}`}
-        >
-          <strong className="block text-sm">By chosen dish</strong>
-          <span className="text-xs text-black/50">
-            Everyone pays their item
-          </span>
-          <span className="mt-2 block text-xs font-black text-[#087f5b]">
-            {dishVotes} vote{dishVotes === 1 ? "" : "s"}
-          </span>
-        </button>
-      </div>
-      <div className="mt-4 space-y-2">
-        {members.map((member, index) => (
-          <div
-            key={member}
-            className="flex items-center justify-between text-sm"
-          >
-            <span>
-              {member}
-              {index === 0 ? " · host" : ""}
-            </span>
-            <span className="flex items-center gap-2">
-              <strong>
-                {unanimous === "dish"
-                  ? `AED ${(basket[index]?.price ?? total / 3).toFixed(2)}`
-                  : unanimous === "equal"
-                    ? `AED ${(total / 3).toFixed(2)}`
-                    : votes[member] === "equal"
-                      ? "Equal"
-                      : votes[member] === "dish"
-                        ? "Own dish"
-                        : "Voting…"}
-              </strong>
-              <i
-                className={`h-2 w-2 rounded-full ${votes[member] ? "bg-[#087f5b]" : "bg-black/15"}`}
-              />
-            </span>
-          </div>
-        ))}
-      </div>
-      {unanimous ? (
-        <div className="mt-4 rounded-xl bg-[#e6fff5] p-3 text-center">
-          <p className="text-xs font-bold text-[#087f5b]">UNANIMOUS DECISION</p>
-          <p className="text-sm font-black">
-            {unanimous === "equal"
-              ? "Split the cart equally"
-              : "Pay for each chosen dish"}
-          </p>
-        </div>
-      ) : (
-        <p className="mt-4 text-center text-xs text-black/45">
-          Payment unlocks when all three agree.
-        </p>
-      )}
-      <button
-        disabled={!unanimous}
-        onClick={onComplete}
-        className="mt-4 w-full rounded-xl bg-[#07110d] py-3 font-black text-white disabled:opacity-25"
-      >
-        Confirm split & send payment links
-      </button>
-    </div>
-  );
-}
+/* ---------- the feed ---------- */
 
 export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
-  const [feed, setFeed] = useState(initialDishes),
-    [profile, setProfile] = useState<TasteProfile>(emptyTasteProfile),
-    [loaded, setLoaded] = useState(false),
-    [liked, setLiked] = useState<Set<string>>(new Set()),
-    [saved, setSaved] = useState<Set<string>>(new Set()),
-    [basket, setBasket] = useState<Dish[]>([]),
-    [toast, setToast] = useState(""),
-    [panel, setPanel] = useState<Panel>(null),
-    [chat, setChat] = useState("What can I get for AED 45 in 25 minutes?"),
-    [reply, setReply] = useState(""),
-    [chatting, setChatting] = useState(false),
-    [upload, setUpload] = useState(""),
-    [roomReady, setRoomReady] = useState(false),
-    [split, setSplit] = useState(false);
-  const [feedMode, setFeedMode] = useState<"following" | "for-you">("for-you");
-  const feedRef = useRef<HTMLDivElement>(null),
-    active = useRef(0),
-    viewAt = useRef(0),
-    profileRef = useRef(profile);
-  const total = useMemo(
-    () => basket.reduce((s, x) => s + x.price, 0),
-    [basket],
+  const [feed, setFeed] = useState(initialDishes);
+  const [uploads, setUploads] = useState<Dish[]>([]);
+  const [tokens, setTokens] = useState<Record<string, string>>({});
+  const [profile, setProfile] = useState<TasteProfile>(emptyTasteProfile);
+  const [loaded, setLoaded] = useState(false);
+  const [liked, setLiked] = useState<Set<string>>(new Set());
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [basket, setBasket] = useState<Dish[]>([]);
+  const [follows, setFollows] = useState<Set<string>>(
+    () => new Set(initialDishes.filter(ownAccount).map(handleOf)),
   );
+  const [mode, setMode] = useState<Mode>("for-you");
+  const [results, setResults] = useState<{ label: string; dishes: Dish[] } | null>(null);
+  const [current, setCurrent] = useState(0);
+  const [clean, setClean] = useState(false);
+  const [hint, setHint] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [sound, setSound] = useState(false);
+  const [failed, setFailed] = useState<Set<string>>(new Set());
+  const [hearts, setHearts] = useState<{ id: number; x: number; y: number; r: number }[]>([]);
+  const [flights, setFlights] = useState<Flight[]>([]);
+  const [bump, setBump] = useState(false);
+  const [toast, setToast] = useState("");
+  const [panel, setPanel] = useState<Panel>(null);
+  const [menuDish, setMenuDish] = useState<Dish | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [reviewFor, setReviewFor] = useState<Dish | null>(null);
+  const [friendsFor, setFriendsFor] = useState<Dish | null>(null);
+  const [myReviews, setMyReviews] = useState<Record<string, Review[]>>({});
+  const [draft, setDraft] = useState("");
+  const [draftRating, setDraftRating] = useState(5);
+  const [query, setQuery] = useState("");
+  const [upload, setUpload] = useState("");
+  const [split, setSplit] = useState(false);
+  const [chat, setChat] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [form, setForm] = useState({
+    type: "restaurant" as "restaurant" | "customer",
+    restaurant: "",
+    dish: "",
+    price: "",
+    cuisine: "Other" as Cuisine,
+    description: "",
+    ingredients: "",
+    name: "",
+  });
+  const [file, setFile] = useState<File | null>(null);
+  const [filePreview, setFilePreview] = useState("");
+  const [poster, setPoster] = useState<Blob | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const screenRef = useRef<HTMLElement>(null);
+  const feedRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const bagRef = useRef<HTMLButtonElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const active = useRef(0);
+  const viewAt = useRef(0);
+  const profileRef = useRef(profile);
+  const hiddenRef = useRef(hidden);
+  const cleanRef = useRef(false);
+  const currentIdRef = useRef("");
+  const retriedRef = useRef("");
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressStart = useRef({ x: 0, y: 0 });
+  const longPressed = useRef(false);
+  const idCounter = useRef(0);
+
+  const catalog = useMemo(() => [...uploads, ...initialDishes], [uploads, initialDishes]);
+  const total = useMemo(() => basket.reduce((s, x) => s + x.price, 0), [basket]);
+
+  /* restore the taste profile, follows, hidden dishes, reviews and upload tokens; then load uploads */
   useEffect(() => {
     viewAt.current = performance.now();
     const id = setTimeout(() => {
       try {
         const raw = localStorage.getItem("crave-taste-profile");
+        const hid = new Set<string>(JSON.parse(localStorage.getItem("crave-hidden") ?? "[]"));
+        hiddenRef.current = hid;
         if (raw) {
-          const restored = {
-            ...emptyTasteProfile(),
-            ...JSON.parse(raw),
-          } as TasteProfile;
+          const restored = { ...emptyTasteProfile(), ...JSON.parse(raw) } as TasteProfile;
           profileRef.current = restored;
           setProfile(restored);
           setLiked(new Set(restored.liked));
           setSaved(new Set(restored.saved));
-          setFeed(rankDishes(initialDishes, restored));
-        }
+          setFeed(rankDishes(initialDishes.filter((d) => !hid.has(d.id)), restored));
+        } else if (hid.size) setFeed(initialDishes.filter((d) => !hid.has(d.id)));
+        setHidden(hid);
+        const f = localStorage.getItem("crave-follows");
+        if (f) setFollows(new Set(JSON.parse(f) as string[]));
+        const r = localStorage.getItem("crave-my-reviews");
+        if (r) setMyReviews(JSON.parse(r));
+        const t = localStorage.getItem("crave-upload-tokens");
+        if (t) setTokens(JSON.parse(t));
       } catch {}
       setLoaded(true);
+      fetch("/api/uploads", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((data: { uploads?: UploadMeta[] }) => {
+          const list = (data.uploads ?? []).map(toDish);
+          if (!list.length) return;
+          setUploads(list);
+          setFeed((cur) => [
+            ...list.filter((d) => !hiddenRef.current.has(d.id) && !cur.some((c) => c.id === d.id)),
+            ...cur,
+          ]);
+        })
+        .catch(() => {});
     }, 0);
     return () => clearTimeout(id);
   }, [initialDishes]);
   useEffect(() => {
-    if (loaded)
+    if (!loaded) return;
+    hiddenRef.current = hidden;
+    try {
+      localStorage.setItem("crave-taste-profile", JSON.stringify(profile));
+      localStorage.setItem("crave-follows", JSON.stringify([...follows]));
+      localStorage.setItem("crave-hidden", JSON.stringify([...hidden]));
+      localStorage.setItem("crave-my-reviews", JSON.stringify(myReviews));
+      localStorage.setItem("crave-upload-tokens", JSON.stringify(tokens));
+    } catch {}
+  }, [profile, follows, hidden, myReviews, tokens, loaded]);
+
+  useEffect(() => {
+    currentIdRef.current = feed[current]?.id ?? "";
+  }, [feed, current]);
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: "end" });
+  }, [chat, chatBusy, panel]);
+
+  /* messages from TikTok's embed player: ready, play state, errors */
+  useEffect(() => {
+    const send = (type: string) =>
+      frameRef.current?.contentWindow?.postMessage({ type, "x-tiktok-player": true }, "*");
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== "https://www.tiktok.com") return;
+      let data: { type?: string; value?: unknown } | null = null;
       try {
-        localStorage.setItem("crave-taste-profile", JSON.stringify(profile));
+        data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
       } catch {}
-  }, [profile, loaded]);
+      if (!data?.type) return;
+      if (data.type === "onPlayerReady") {
+        send(sound ? "unMute" : "mute");
+        send("play");
+      } else if (data.type === "onStateChange") {
+        if (data.value === 1) setPaused(false);
+        else if (data.value === 2) setPaused(true);
+      } else if (data.type === "onPlayerError") {
+        const value = data.value as { errorCode?: number } | number | undefined;
+        const code = typeof value === "object" ? value?.errorCode : value;
+        if (code === 3002) {
+          // autoplay was blocked: retry once muted, then leave the play mark for a tap
+          const id = currentIdRef.current;
+          if (retriedRef.current !== id) {
+            retriedRef.current = id;
+            send("mute");
+            send("play");
+          } else setPaused(true);
+        } else {
+          const id = currentIdRef.current;
+          if (id) setFailed((s) => new Set(s).add(id));
+        }
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [sound]);
+
   const flash = (m: string) => {
     setToast(m);
     setTimeout(() => setToast(""), 1800);
   };
-  const toggle = (
-    setter: React.Dispatch<React.SetStateAction<Set<string>>>,
-    id: string,
-  ) =>
+  const tt = (type: string) => frameRef.current?.contentWindow?.postMessage({ type, "x-tiktok-player": true }, "*");
+  const setCleanMode = (value: boolean) => {
+    cleanRef.current = value;
+    setClean(value);
+    if (value) {
+      setHint(true);
+      setTimeout(() => setHint(false), 1700);
+    }
+  };
+  const openPanel = (p: Panel) => {
+    if (cleanRef.current) {
+      cleanRef.current = false;
+      setClean(false);
+    }
+    setMenuDish(null);
+    setPanel(p);
+  };
+  const close = () => {
+    setPanel(null);
+    setSplit(false);
+  };
+
+  const onFrameLoad = () => {
+    setTimeout(() => {
+      tt(sound ? "unMute" : "mute");
+      tt("play");
+    }, 900);
+  };
+  const toggleSound = () => {
+    const next = !sound;
+    setSound(next);
+    if (feed[current]?.tiktokId) tt(next ? "unMute" : "mute");
+    if (videoRef.current) videoRef.current.muted = !next;
+  };
+  const togglePlay = () => {
+    const next = !paused;
+    setPaused(next);
+    if (feed[current]?.tiktokId) tt(next ? "pause" : "play");
+    const v = videoRef.current;
+    if (v) {
+      if (next) v.pause();
+      else void v.play();
+    }
+  };
+
+  /* rebuild the feed for a mode + filter, keeping what the profile has learned */
+  const rebuild = (m: Mode, fol: Set<string>, hid: Set<string> = hidden) => {
+    const source = catalog.filter(
+      (d) => !hid.has(d.id) && (m === "for-you" || fol.has(handleOf(d))),
+    );
+    const list = rankDishes(source, profileRef.current);
+    setFeed(list);
+    active.current = 0;
+    viewAt.current = 0;
+    setCurrent(0);
+    setPaused(false);
+    requestAnimationFrame(() => feedRef.current?.scrollTo({ top: 0 }));
+    return list;
+  };
+
+  const learn = (dish: Dish, signal: TasteSignal, value = 0, preserve = active.current) => {
+    const next = applyTasteSignal(profileRef.current, dish, signal, value);
+    profileRef.current = next;
+    setProfile(next);
+    setFeed((cur) => [...cur.slice(0, preserve + 1), ...rankDishes(cur.slice(preserve + 1), next)]);
+  };
+  const toggleSet = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
     setter((cur) => {
       const n = new Set(cur);
       if (n.has(id)) n.delete(id);
       else n.add(id);
       return n;
     });
-  const learn = (
-    dish: Dish,
-    signal: TasteSignal,
-    value = 0,
-    preserve = active.current,
-  ) => {
-    const next = applyTasteSignal(profileRef.current, dish, signal, value);
-    profileRef.current = next;
-    setProfile(next);
-    setFeed((cur) => [
-      ...cur.slice(0, preserve + 1),
-      ...rankDishes(cur.slice(preserve + 1), next),
-    ]);
+  const love = (dish: Dish) => {
+    const yes = !liked.has(dish.id);
+    toggleSet(setLiked, dish.id);
+    learn(dish, yes ? "like" : "unlike");
+    if (yes) flash(`More ${dish.cuisine} coming up`);
   };
-  const skip = (dish: Dish) => {
-    learn(dish, "skip");
-    feedRef.current?.children[
-      Math.min(active.current + 1, feed.length - 1)
-    ]?.scrollIntoView({ behavior: "smooth" });
+  const save = (dish: Dish) => {
+    const yes = !saved.has(dish.id);
+    toggleSet(setSaved, dish.id);
+    learn(dish, yes ? "save" : "unsave");
+    flash(yes ? "Added to your hit list" : "Removed from hit list");
   };
-  const add = (dish: Dish) => {
-    if (!basket.some((x) => x.id === dish.id)) {
-      setBasket((x) => [...x, dish]);
-      learn(dish, "basket");
+
+  /* bag: add with a fly-to-bag animation, remove again from the card, hit list or bag */
+  const addToBag = (dish: Dish, from?: HTMLElement) => {
+    setBasket((x) => (x.some((i) => i.id === dish.id) ? x : [...x, dish]));
+    learn(dish, "basket");
+    flash(`${dish.name} added to bag`);
+    setBump(true);
+    setTimeout(() => setBump(false), 450);
+    const screen = screenRef.current?.getBoundingClientRect();
+    const a = from?.getBoundingClientRect();
+    const b = bagRef.current?.getBoundingClientRect();
+    if (screen && a && b) {
+      const id = ++idCounter.current;
+      const x = a.left + a.width / 2 - screen.left;
+      const y = a.top + a.height / 2 - screen.top;
+      setFlights((f) => [
+        ...f,
+        { id, x, y, dx: b.left + b.width / 2 - screen.left - x, dy: b.top + b.height / 2 - screen.top - y, img: dish.imageUrl },
+      ]);
+      setTimeout(() => setFlights((f) => f.filter((i) => i.id !== id)), 800);
     }
-    flash(`${dish.name} added`);
   };
-  const selectFeed = (mode: "following" | "for-you") => {
-    setFeedMode(mode);
-    active.current = 0;
-    viewAt.current = 0;
-    const source =
-      mode === "following"
-        ? initialDishes.filter((dish) => dish.reviewCreator)
-        : initialDishes;
-    setFeed(rankDishes(source, profileRef.current));
-    requestAnimationFrame(() =>
-      feedRef.current?.scrollTo({ top: 0, behavior: "smooth" }),
-    );
+  const removeFromBag = (dish: Dish) => {
+    setBasket((x) => x.filter((i) => i.id !== dish.id));
+    flash(`${dish.name} removed`);
   };
+  const toggleBag = (dish: Dish, from?: HTMLElement) =>
+    basket.some((i) => i.id === dish.id) ? removeFromBag(dish) : addToBag(dish, from);
+
+  const toggleFollow = (dish: Dish) => {
+    const h = handleOf(dish);
+    const next = new Set(follows);
+    if (next.has(h)) next.delete(h);
+    else next.add(h);
+    setFollows(next);
+    flash(next.has(h) ? `Following ${h}` : `Unfollowed ${h}`);
+  };
+
+  /* long-press menu: "not interested" / "don't recommend" / delete own upload */
+  const hideDishes = (dish: Dish, scope: "dish" | "restaurant") => {
+    const ids = scope === "restaurant" ? catalog.filter((d) => d.restaurant === dish.restaurant) : [dish];
+    const next = new Set(hidden);
+    ids.forEach((d) => next.add(d.id));
+    setHidden(next);
+    learn(dish, "skip");
+    setFeed((cur) => cur.filter((d) => !next.has(d.id)));
+    setMenuDish(null);
+    flash(scope === "restaurant" ? `We won't recommend ${dish.restaurant}` : "Got it — we'll show less like this");
+  };
+  const deleteUpload = async (dish: Dish) => {
+    const token = dish.uploadId ? tokens[dish.uploadId] : undefined;
+    if (!dish.uploadId || !token) return;
+    setMenuDish(null);
+    try {
+      const r = await fetch(`/api/uploads/${dish.uploadId}`, { method: "DELETE", headers: { "x-delete-token": token } });
+      if (!r.ok) throw new Error("Couldn't delete that video");
+      setUploads((u) => u.filter((d) => d.id !== dish.id));
+      setFeed((cur) => cur.filter((d) => d.id !== dish.id));
+      setBasket((b) => b.filter((d) => d.id !== dish.id));
+      flash("Your video was deleted");
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Couldn't delete that video");
+    }
+  };
+
   const onScroll = (el: HTMLDivElement, now: number) => {
     const next = Math.round(el.scrollTop / el.clientHeight);
     if (next === active.current) return;
-    const previous = feed[active.current],
-      elapsed = viewAt.current ? now - viewAt.current : 0;
-    if (previous)
-      learn(previous, "dwell", elapsed, Math.max(active.current, next));
+    const previous = feed[active.current];
+    const elapsed = viewAt.current ? now - viewAt.current : 0;
+    if (previous) learn(previous, "dwell", elapsed, Math.max(active.current, next));
     active.current = next;
     viewAt.current = now;
+    setCurrent(next);
+    setPaused(false);
   };
-  async function ask() {
-    setChatting(true);
-    setReply("");
+
+  const isInteractive = (e: React.SyntheticEvent) =>
+    !!(e.target as HTMLElement).closest("button,a,input,textarea,label,select,aside");
+
+  /* Tap the video: single tap clears/restores the text, double tap loves, hold opens the menu. */
+  const onTap = (dish: Dish, e: React.MouseEvent) => {
+    if (longPressed.current) {
+      longPressed.current = false;
+      return;
+    }
+    if (isInteractive(e)) return;
+    const rect = screenRef.current?.getBoundingClientRect();
+    if (tapTimer.current) {
+      clearTimeout(tapTimer.current);
+      tapTimer.current = null;
+      const id = ++idCounter.current;
+      setHearts((h) => [
+        ...h,
+        { id, x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0), r: Math.random() * 30 - 15 },
+      ]);
+      setTimeout(() => setHearts((h) => h.filter((x) => x.id !== id)), 900);
+      if (!liked.has(dish.id)) love(dish);
+      return;
+    }
+    tapTimer.current = setTimeout(() => {
+      tapTimer.current = null;
+      setCleanMode(!cleanRef.current);
+    }, 260);
+  };
+  const startPress = (dish: Dish, e: React.PointerEvent) => {
+    if (isInteractive(e)) return;
+    pressStart.current = { x: e.clientX, y: e.clientY };
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(() => {
+      pressTimer.current = null;
+      longPressed.current = true;
+      if (tapTimer.current) {
+        clearTimeout(tapTimer.current);
+        tapTimer.current = null;
+      }
+      navigator.vibrate?.(15);
+      setMenuDish(dish);
+    }, 550);
+  };
+  const movePress = (e: React.PointerEvent) => {
+    if (!pressTimer.current) return;
+    if (Math.hypot(e.clientX - pressStart.current.x, e.clientY - pressStart.current.y) > 10) cancelPress();
+  };
+  const cancelPress = () => {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+  };
+
+  /* search: recommendations are listed in the sheet; the feed itself is never filtered */
+  const showResults = (label: string, test: (d: Dish) => boolean) => {
+    const list = catalog.filter((d) => !hidden.has(d.id) && test(d)).sort((a, b) => b.match - a.match);
+    setResults({ label, dishes: list });
+  };
+  const submitQuery = () => {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return;
+    showResults(query.trim(), (d) => {
+      const hay = [d.name, d.restaurant, d.cuisine, d.description, ...d.tags, ...(d.ingredients ?? [])].join(" ").toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    });
+  };
+  const jumpTo = (dish: Dish) => {
+    close();
+    let idx = feed.findIndex((d) => d.id === dish.id);
+    if (idx >= 0) {
+      setTimeout(() => feedRef.current?.children[idx]?.scrollIntoView({ behavior: "smooth" }), 60);
+      return;
+    }
+    setMode("for-you");
+    const list = rebuild("for-you", follows);
+    idx = list.findIndex((d) => d.id === dish.id);
+    setTimeout(() => feedRef.current?.children[idx]?.scrollIntoView(), 120);
+  };
+
+  /* Ask Crave: the chatbot (answers come from the Careem MCP via /api/chat) */
+  async function sendChat(text = chatInput) {
+    const content = text.trim();
+    if (!content || chatBusy) return;
+    const next: ChatMsg[] = [...chat, { role: "user", content }];
+    setChat(next);
+    setChatInput("");
+    setChatBusy(true);
     try {
-      const r = await fetch("/api/recommend", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt: chat }),
-        }),
-        data = await r.json();
+      const r = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messages: next.map(({ role, content }) => ({ role, content })) }),
+      });
+      const data = await r.json();
       if (!r.ok) throw new Error(data.error);
-      const top = data.recommendations?.[0];
-      setReply(
-        top
-          ? `Try ${top.name} from ${top.restaurant} — AED ${top.price}, around ${top.minutes} min. I found it through Careem.`
-          : "I couldn't find a strong match yet.",
-      );
+      setChat([...next, { role: "assistant", content: data.reply, tools: data.toolsUsed, dishIds: data.dishIds, mode: data.mode }]);
     } catch (e) {
-      setReply(e instanceof Error ? e.message : "I couldn't search right now.");
+      setChat([...next, { role: "assistant", content: e instanceof Error ? e.message : "I couldn't reach Careem just now." }]);
     } finally {
-      setChatting(false);
+      setChatBusy(false);
     }
   }
-  function close() {
-    setPanel(null);
-    setSplit(false);
-  }
+  const askFromSearch = () => {
+    const q = query.trim();
+    openPanel("chat");
+    if (q) void sendChat(q);
+  };
+
+  /* upload a dish video */
+  const pickFile = async (f: File | undefined) => {
+    setFormError("");
+    if (!f) return;
+    if (!["video/mp4", "video/webm", "video/quicktime"].includes(f.type)) return setFormError("Choose an MP4, WebM or MOV video.");
+    if (f.size > 100 * 1024 * 1024) return setFormError("Videos must be under 100 MB.");
+    if (filePreview) URL.revokeObjectURL(filePreview);
+    const url = URL.createObjectURL(f);
+    setFile(f);
+    setFilePreview(url);
+    setPoster(await makePoster(url));
+  };
+  const resetUpload = () => {
+    if (filePreview) URL.revokeObjectURL(filePreview);
+    setFile(null);
+    setFilePreview("");
+    setPoster(null);
+    setFormError("");
+    setForm({ type: "restaurant", restaurant: "", dish: "", price: "", cuisine: "Other", description: "", ingredients: "", name: "" });
+  };
+  const canPost = !!file && form.restaurant.trim() && form.dish.trim() && form.price !== "" && Number(form.price) >= 0 && !posting;
+  const submitUpload = async () => {
+    if (!file || !canPost) return;
+    setPosting(true);
+    setFormError("");
+    try {
+      const body = new FormData();
+      body.set("video", file);
+      if (poster) body.set("poster", new File([poster], "poster.jpg", { type: "image/jpeg" }));
+      body.set("uploaderType", form.type);
+      body.set("restaurant", form.restaurant);
+      body.set("dish", form.dish);
+      body.set("price", form.price);
+      body.set("cuisine", form.cuisine);
+      body.set("description", form.description);
+      body.set("ingredients", form.ingredients);
+      body.set("uploaderName", form.name);
+      const r = await fetch("/api/uploads", { method: "POST", body });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      const dish = toDish(data.upload as UploadMeta);
+      setTokens((t) => ({ ...t, [data.upload.id]: data.deleteToken }));
+      setUploads((u) => [dish, ...u]);
+      setFeed((cur) => [dish, ...cur]);
+      active.current = 0;
+      setCurrent(0);
+      setPaused(false);
+      requestAnimationFrame(() => feedRef.current?.scrollTo({ top: 0 }));
+      resetUpload();
+      close();
+      flash("Your video is live");
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  /* reviews and friends */
+  const reviewList = (dish: Dish) => [...(myReviews[dish.id] ?? []), ...(sampleReviews[dish.id] ?? [])];
+  const openReviews = (dish: Dish) => {
+    setReviewFor(dish);
+    setDraft("");
+    setDraftRating(5);
+    openPanel("reviews");
+  };
+  const postReview = () => {
+    if (!reviewFor || !draft.trim()) return;
+    const mine: Review = { name: "You", rating: draftRating, text: draft.trim(), when: "Just now" };
+    setMyReviews((cur) => ({ ...cur, [reviewFor.id]: [mine, ...(cur[reviewFor.id] ?? [])] }));
+    setDraft("");
+    flash("Review posted");
+  };
+  const openFriends = (dish: Dish) => {
+    setFriendsFor(dish);
+    openPanel("friends");
+  };
+
+  const savedDishes = catalog.filter((d) => saved.has(d.id));
+  const bagTabs = (
+    <div className="mb-3 flex rounded-full bg-white/10 p-1 text-[11.5px] font-bold">
+      {(
+        [
+          ["basket", `Bag (${basket.length})`],
+          ["hitlist", `Hit list (${savedDishes.length})`],
+        ] as const
+      ).map(([key, label]) => (
+        <button
+          key={key}
+          onClick={() => setPanel(key)}
+          className={`flex-1 rounded-full py-1.5 transition ${panel === key ? "bg-white text-[#062a1c]" : "text-white/70"}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="phone-shell">
       <span className="dynamic-island" />
-      <main className="phone-screen relative h-full w-full overflow-hidden bg-[#07110d]">
-        <div className="feed-tabs absolute left-1/2 top-5 z-40 flex -translate-x-1/2 gap-5 text-sm font-bold">
-          <button
-            onClick={() => selectFeed("following")}
-            className={feedMode === "following" ? "active" : ""}
-          >
-            Following
-          </button>
-          <button
-            onClick={() => selectFeed("for-you")}
-            className={feedMode === "for-you" ? "active" : ""}
-          >
-            For You
-          </button>
-        </div>
-        <header className="safe-top pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-between px-5">
-          <div className="pointer-events-auto flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#2de3a1] text-xl font-black text-[#07110d]">
-              C
-            </span>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[.22em] text-white/55">
-                Careem
-              </p>
-              <p className="-mt-0.5 text-lg font-black tracking-tight">crave</p>
-            </div>
+      <main
+        ref={screenRef}
+        className={`phone-screen relative h-full w-full select-none overflow-hidden bg-black ${clean ? "clean" : ""}`}
+      >
+        {/* top bar: Careem mark · Following  For You · assistant + search */}
+        <header className="hud top-bar pointer-events-none absolute inset-x-0 top-0 z-30 grid grid-cols-[1fr_auto_1fr] items-center px-4">
+          <div className="pointer-events-auto flex items-center">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#2de3a1] text-base font-bold text-[#062a1c]">C</span>
           </div>
-          <div className="pointer-events-auto flex gap-2">
-            <button
-              aria-label="Find from screenshot"
-              onClick={() => setPanel("camera")}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-black/30 backdrop-blur"
-            >
-              <Icon name="camera" size={19} />
+          <div className="pointer-events-auto flex gap-5" style={{ textShadow: "0 1px 8px rgba(0,0,0,.7)" }}>
+            {(["following", "for-you"] as Mode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => {
+                  setMode(m);
+                  rebuild(m, follows);
+                }}
+                className={`flex flex-col items-center text-[11.5px] font-bold transition ${mode === m ? "text-white" : "text-white/60"}`}
+              >
+                {m === "following" ? "Following" : "For You"}
+                <span className={`mt-1 h-[2px] w-5 rounded-full ${mode === m ? "bg-white" : "bg-transparent"}`} />
+              </button>
+            ))}
+          </div>
+          <div className="pointer-events-auto flex justify-end gap-0.5 text-white drop-shadow-[0_1px_4px_rgba(0,0,0,.6)]">
+            <button aria-label="Ask Crave" onClick={() => openPanel("chat")} className="grid h-8 w-8 place-items-center">
+              <Icon name="spark" size={20} />
             </button>
-            <button
-              aria-label="Ask food assistant"
-              onClick={() => setPanel("chat")}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-black/30 backdrop-blur"
-            >
-              <Icon name="chat" size={19} />
+            <button aria-label="Search cravings" onClick={() => openPanel("search")} className="grid h-8 w-8 place-items-center">
+              <Icon name="search" size={20} />
             </button>
           </div>
         </header>
+
+        <p
+          className="hud pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 text-[9.5px] font-semibold text-white/90"
+          style={{ top: "calc(var(--top-h) - 4px)", textShadow: "0 1px 6px rgba(0,0,0,.8)" }}
+        >
+          <Icon name="pin" size={11} /> Dubai Marina
+        </p>
+
+        {/* the video feed */}
         <div
           ref={feedRef}
           onScroll={(e) => onScroll(e.currentTarget, e.timeStamp)}
-          className="hide-scrollbar h-full snap-y snap-mandatory overflow-y-auto"
+          className="hide-scrollbar h-full snap-y snap-mandatory overflow-y-auto overscroll-contain"
         >
-          {feed.map((dish, index) => (
-            <section
-              key={dish.id}
-              className="grain relative h-full snap-start overflow-hidden"
-            >
-              <Media dish={dish} />
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/55 via-transparent via-40% to-[#07110d]" />
-              {dish.reviewUrl && (
-                <a
-                  href={dish.reviewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="absolute left-4 top-[74px] z-20 rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-white/80 backdrop-blur"
-                >
-                  ↗ {dish.reviewCreator} · {dish.reviewPlatform}
-                </a>
-              )}
-              <div className="absolute bottom-[132px] left-0 right-0 z-10 flex items-end gap-3 px-5 pb-4">
-                <div className="min-w-0 flex-1">
-                  <button
-                    onClick={() => flash(tasteReason(dish, profile))}
-                    className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-[#2de3a1]/30 bg-[#092419]/85 px-3 py-1.5 text-xs font-bold text-[#7df2c5] backdrop-blur"
-                  >
-                    <Icon name="spark" size={14} />
-                    {tasteScore(dish, profile)}% for you
-                  </button>
-                  <p className="mb-1 text-sm font-bold text-[#2de3a1]">
-                    {dish.restaurant}
-                  </p>
-                  <h1 className="text-[30px] font-black leading-[1.03] tracking-[-.04em]">
-                    {dish.name}
-                  </h1>
-                  <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-white/75">
-                    {dish.description}
-                  </p>
-                  <div className="mt-3 flex items-center gap-2 text-xs font-semibold">
-                    <span className="text-amber-300">★ {dish.rating}</span>
-                    <span className="text-white/40">({dish.reviews})</span>
-                    <span className="text-white/25">•</span>
-                    <span>{dish.deliveryMinutes} min</span>
-                    <span className="text-white/25">•</span>
-                    <span>AED {dish.price}</span>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {dish.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="rounded-md bg-white/12 px-2 py-1 text-[10px] font-bold backdrop-blur"
+          {feed.length === 0 && (
+            <div className="grid h-full place-items-center px-10 text-center">
+              <div>
+                <p className="text-[15px] font-bold">Nothing to show</p>
+                <p className="mt-2 text-[12px] text-white/60">
+                  {mode === "following"
+                    ? "Follow accounts with the + on a dish and they'll show up in this tab."
+                    : "You've hidden everything here. Reset hidden dishes from the search sheet."}
+                </p>
+              </div>
+            </div>
+          )}
+          {feed.map((dish, index) => {
+            const activity = friendActivity[dish.id] ?? [];
+            const friends = activity.map((a) => a.name);
+            const handle = handleOf(dish);
+            const isFollowing = follows.has(handle);
+            const inBag = basket.some((x) => x.id === dish.id);
+            const comments = reviewList(dish);
+            const isCurrent = index === current;
+            const isOpen = expanded === dish.id;
+            const playable = !!(dish.tiktokId || dish.videoUrl);
+            const tags = (dish.ingredients ?? []).map((i) => "#" + i.replace(/[^a-zA-Z0-9]/g, "")).join(" ");
+            return (
+              <section
+                key={dish.id}
+                onClick={(e) => onTap(dish, e)}
+                onPointerDown={(e) => startPress(dish, e)}
+                onPointerMove={movePress}
+                onPointerUp={cancelPress}
+                onPointerLeave={cancelPress}
+                onPointerCancel={cancelPress}
+                onContextMenu={(e) => e.preventDefault()}
+                className="grain cqbox relative h-full snap-start overflow-hidden"
+              >
+                <Media
+                  dish={dish}
+                  live={isCurrent}
+                  sound={sound}
+                  failed={failed.has(dish.id)}
+                  frameRef={frameRef}
+                  videoRef={videoRef}
+                  onFrameLoad={onFrameLoad}
+                />
+
+                <div className="hud pointer-events-none absolute inset-0">
+                  <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent via-25% to-black/70" />
+
+                  {/* sound + pause: small plain icons, always reachable */}
+                  {isCurrent && playable && (
+                    <div
+                      className="absolute right-4 flex flex-col gap-1 text-white drop-shadow-[0_1px_4px_rgba(0,0,0,.6)]"
+                      style={{ top: "calc(var(--top-h) + 10px)" }}
+                    >
+                      <button
+                        aria-label={sound ? "Mute" : "Turn sound on"}
+                        onClick={toggleSound}
+                        className="pointer-events-auto grid h-8 w-8 place-items-center transition active:scale-90"
                       >
-                        {tag}
+                        <Icon name={sound ? "volume" : "mute"} size={19} />
+                      </button>
+                      {!failed.has(dish.id) && (
+                        <button
+                          aria-label={paused ? "Play video" : "Pause video"}
+                          onClick={togglePlay}
+                          className="pointer-events-auto grid h-8 w-8 place-items-center transition active:scale-90"
+                        >
+                          <Icon name={paused ? "play" : "pause"} filled size={18} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* paused: TikTok's faint, plain play triangle (no circle, no shadow) */}
+                  {isCurrent && playable && paused && !failed.has(dish.id) && (
+                    <button
+                      aria-label="Play video"
+                      onClick={togglePlay}
+                      className="pointer-events-auto absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/50 transition active:scale-90"
+                    >
+                      <Icon name="play" filled size={58} />
+                    </button>
+                  )}
+
+                  {/* right rail (low, like TikTok) */}
+                  <div
+                    className="absolute right-2.5 flex flex-col items-center gap-2"
+                    style={{ bottom: "calc(var(--nav-h) + 54px)" }}
+                  >
+                    <div className="relative mb-2">
+                      <span className="ring grid h-[46px] w-[46px] place-items-center rounded-full p-[2.5px]">
+                        <span
+                          className="grid h-full w-full place-items-center rounded-full border-2 border-black text-base font-bold uppercase"
+                          style={{ background: `hsl(${hueOf(handle)} 55% 36%)` }}
+                        >
+                          {handle[1]}
+                        </span>
                       </span>
-                    ))}
+                      <button
+                        aria-label={isFollowing ? "Following" : "Follow"}
+                        onClick={() => toggleFollow(dish)}
+                        className="pointer-events-auto absolute -bottom-2 left-1/2 grid h-[18px] w-[18px] -translate-x-1/2 place-items-center rounded-full bg-[#2de3a1] text-[#062a1c] transition"
+                      >
+                        <Icon name={isFollowing ? "check" : "plus"} size={12} />
+                      </button>
+                    </div>
+                    <RailButton label={liked.has(dish.id) ? "Loved" : "Love"} icon="heart" active={liked.has(dish.id)} onClick={() => love(dish)} />
+                    <RailButton label={String(comments.length)} icon="chat" onClick={() => openReviews(dish)} />
+                    <RailButton
+                      label={saved.has(dish.id) ? "Saved" : "Save"}
+                      icon="bookmark"
+                      active={saved.has(dish.id)}
+                      onClick={() => save(dish)}
+                    />
+                    <RailButton
+                      label="Share"
+                      icon="share"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(dish.reviewUrl ?? location.href);
+                        flash("Link copied");
+                      }}
+                    />
                   </div>
-                </div>
-                <div className="flex shrink-0 flex-col gap-3 pb-1">
-                  <Action
-                    label={liked.has(dish.id) ? "Loved" : "Love"}
-                    icon="heart"
-                    active={liked.has(dish.id)}
-                    onClick={() => {
-                      const yes = !liked.has(dish.id);
-                      toggle(setLiked, dish.id);
-                      learn(dish, yes ? "like" : "unlike");
-                      if (yes) flash(`More ${dish.cuisine} coming up`);
-                    }}
-                  />
-                  <Action
-                    label="Save"
-                    icon="bookmark"
-                    active={saved.has(dish.id)}
-                    onClick={() => {
-                      const yes = !saved.has(dish.id);
-                      toggle(setSaved, dish.id);
-                      learn(dish, yes ? "save" : "unsave");
-                    }}
-                  />
-                  <Action
-                    label="Share"
-                    icon="share"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(location.href);
-                      flash("Link copied");
-                    }}
-                  />
-                </div>
-              </div>
-              <div className="absolute bottom-[76px] left-5 right-5 z-20 pt-3">
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => skip(dish)}
-                    className="grid h-12 w-12 place-items-center rounded-xl border border-white/15 bg-white/10 backdrop-blur"
-                    aria-label="Not for me"
+
+                  {/* TikTok-style caption */}
+                  <div className="absolute left-4 right-[68px]" style={{ bottom: "calc(var(--nav-h) + 54px)", textShadow: "0 1px 8px rgba(0,0,0,.75)" }}>
+                    {friends.length > 0 && (
+                      <button
+                        onClick={() => openFriends(dish)}
+                        className="pointer-events-auto mb-1.5 flex items-center gap-1.5 text-[10.5px] font-semibold text-white/90"
+                      >
+                        <span className="flex -space-x-1.5">
+                          {friends.map((f) => (
+                            <span
+                              key={f}
+                              className="grid h-4 w-4 place-items-center rounded-full border border-black text-[9px] font-bold"
+                              style={{ background: friendColor[f] ?? `hsl(${hueOf(f)} 50% 40%)` }}
+                            >
+                              {f[0]}
+                            </span>
+                          ))}
+                        </span>
+                        {friends.length === 1 ? friends[0] : `${friends[0]} +${friends.length - 1}`} ordered this ›
+                      </button>
+                    )}
+                    <p className="flex items-center gap-1 text-[14px] font-bold">
+                      {handle}
+                      {ownAccount(dish) && (
+                        <span className="grid h-3.5 w-3.5 place-items-center rounded-full bg-[#2de3a1] text-[#062a1c]">
+                          <Icon name="check" size={9} />
+                        </span>
+                      )}
+                    </p>
+                    <p className={`mt-1 text-[12.5px] leading-[1.35] ${isOpen ? "" : "line-clamp-2"}`}>
+                      <b>{dish.name}</b> at {dish.restaurant} — {dish.description} <b className="text-white/90">{tags}</b>
+                    </p>
+                    <button onClick={() => setExpanded(isOpen ? null : dish.id)} className="pointer-events-auto mt-0.5 text-[11.5px] font-bold text-white/80">
+                      {isOpen ? "less" : "more"}
+                    </button>
+                    {isOpen && (
+                      <div className="mt-1.5 flex flex-col items-start gap-1 text-[11px] text-white/85">
+                        {dish.reviewUrl && (
+                          <a href={dish.reviewUrl} target="_blank" rel="noreferrer" className="pointer-events-auto underline">
+                            Watch the original on TikTok ↗
+                          </a>
+                        )}
+                        {dish.restaurantHandle && dish.restaurantHandle !== dish.creatorHandle && dish.tiktokId && (
+                          <a
+                            href={`https://www.tiktok.com/@${dish.restaurantHandle}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="pointer-events-auto underline"
+                          >
+                            {dish.restaurant} on TikTok: @{dish.restaurantHandle} ↗
+                          </a>
+                        )}
+                        {ownAccount(dish) && <span>✔ Posted by the restaurant</span>}
+                        {dish.uploadedBy === "customer" && <span>Shared by a customer</span>}
+                        {dish.tags.length > 0 && (
+                          <span>
+                            {emojiOf(dish)} {dish.tags.join(" · ")}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* minimal order row */}
+                  <div
+                    className="pointer-events-auto absolute inset-x-4 flex items-center justify-between"
+                    style={{ bottom: "calc(var(--nav-h) + 10px)", textShadow: "0 1px 8px rgba(0,0,0,.75)" }}
                   >
-                    <Icon name="close" />
-                  </button>
-                  <button
-                    onClick={() => add(dish)}
-                    className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#2de3a1] font-black text-[#07110d]"
-                  >
-                    <Icon name="bag" size={20} />
-                    Add · AED {dish.price}
-                  </button>
+                    <p className="text-[12.5px] font-bold">AED {dish.price}</p>
+                    <button
+                      onClick={(e) => toggleBag(dish, e.currentTarget)}
+                      className={`flex items-center gap-1.5 text-[10.5px] font-bold transition active:scale-95 ${inBag ? "text-[#2de3a1]" : "text-white"}`}
+                    >
+                      <Icon name={inBag ? "check" : "bag"} size={15} />
+                      {inBag ? "In bag · remove" : "Add to bag"}
+                    </button>
+                  </div>
+
+                  {index === 0 && (
+                    <p
+                      className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/55 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-white/80 backdrop-blur"
+                      style={{ bottom: "calc(var(--nav-h) + 190px)" }}
+                    >
+                      Tap to clear · hold for more
+                    </p>
+                  )}
                 </div>
-              </div>
-              {index === 0 && (
-                <div className="absolute left-1/2 top-24 z-10 -translate-x-1/2 rounded-full bg-black/40 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/65 backdrop-blur">
-                  Swipe up · feed learns as you go
-                </div>
-              )}
-            </section>
-          ))}
+
+                {isCurrent && <div key={dish.id + current} className="progress" />}
+              </section>
+            );
+          })}
         </div>
-        <nav className="safe-bottom absolute inset-x-0 bottom-0 z-40 flex h-[72px] items-start justify-around border-t border-white/10 bg-[#07110d]/95 pt-2 backdrop-blur-xl">
-          <button className="flex flex-col items-center gap-1 text-[10px] font-bold text-[#2de3a1]">
-            <Icon name="home" size={21} />
+
+        {/* floating hearts from double-tap, and dishes flying into the bag */}
+        {hearts.map((h) => (
+          <span
+            key={h.id}
+            className="burst pointer-events-none absolute z-40 text-[#2de3a1]"
+            style={{ left: h.x - 45, top: h.y - 45, ["--r" as string]: `${h.r}deg` }}
+          >
+            <Icon name="heart" filled size={90} />
+          </span>
+        ))}
+        {flights.map((f) => (
+          <img
+            key={f.id}
+            src={f.img}
+            alt=""
+            className="fly pointer-events-none absolute z-[60] h-11 w-11 rounded-xl border-2 border-white bg-white object-cover shadow-lg"
+            style={{ left: f.x - 22, top: f.y - 22, ["--dx" as string]: `${f.dx}px`, ["--dy" as string]: `${f.dy}px` }}
+          />
+        ))}
+
+        {/* bottom bar: TikTok-style, black and slim */}
+        <nav className="hud tabbar absolute inset-x-0 bottom-0 z-40 flex items-start justify-around bg-black px-1 pt-1.5 text-white/60">
+          <button className="flex w-16 flex-col items-center gap-0.5 text-[9px] font-bold text-white">
+            <Icon name="home" size={22} filled />
             Discover
           </button>
-          <button
-            onClick={() => setPanel("camera")}
-            className="flex flex-col items-center gap-1 text-[10px] font-bold text-white/50"
-          >
-            <Icon name="camera" size={21} />
-            Find dish
+          <button onClick={() => openPanel("room")} className="flex w-16 flex-col items-center gap-0.5 text-[9px] font-bold">
+            <Icon name="users" size={22} />
+            Together
           </button>
           <button
-            onClick={() => setPanel("basket")}
-            className="relative -mt-5 grid h-14 w-14 place-items-center rounded-2xl bg-[#2de3a1] text-[#07110d]"
+            onClick={() => openPanel("upload")}
+            aria-label="Share a dish video"
+            className="grid h-8 w-11 place-items-center rounded-lg bg-[#2de3a1] text-[#062a1c] transition active:scale-90"
           >
-            <Icon name="bag" />
+            <Icon name="plus" size={20} />
+          </button>
+          <button
+            ref={bagRef}
+            onClick={() => openPanel("basket")}
+            aria-label="Open bag"
+            className={`relative flex w-16 flex-col items-center gap-0.5 text-[9px] font-bold ${bump ? "bump" : ""}`}
+          >
+            <Icon name="bag" size={22} />
+            Bag
             {basket.length > 0 && (
-              <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-white px-1 text-[10px] font-black">
+              <span className="absolute right-3 top-[-3px] grid h-[16px] min-w-[16px] place-items-center rounded-full bg-[#2de3a1] px-1 text-[9px] font-bold text-[#062a1c]">
                 {basket.length}
               </span>
             )}
           </button>
-          <button
-            onClick={() => setPanel("room")}
-            className="flex flex-col items-center gap-1 text-[10px] font-bold text-white/50"
-          >
-            <Icon name="users" size={21} />
-            Together
-          </button>
-          <button
-            onClick={() => setPanel("profile")}
-            className="flex flex-col items-center gap-1 text-[10px] font-bold text-white/50"
-          >
-            <Icon name="spark" size={21} />
-            Your taste
+          <button onClick={() => openPanel("camera")} className="flex w-16 flex-col items-center gap-0.5 text-[9px] font-bold">
+            <Icon name="camera" size={22} />
+            Find dish
           </button>
         </nav>
+
         {toast && (
-          <div className="pop absolute left-1/2 top-24 z-50 w-max max-w-[85%] -translate-x-1/2 rounded-full bg-white px-4 py-2 text-center text-xs font-bold text-[#07110d] shadow-xl">
+          <div className="pop absolute left-1/2 top-24 z-[70] w-max max-w-[85%] -translate-x-1/2 rounded-lg bg-black/80 px-4 py-2 text-center text-[10.5px] font-bold backdrop-blur">
             {toast}
           </div>
         )}
-        {panel && (
-          <div
-            className="absolute inset-0 z-50 bg-black/65 backdrop-blur-sm"
-            onClick={close}
-          >
-            <aside
-              onClick={(e) => e.stopPropagation()}
-              className="sheet absolute inset-x-0 bottom-0 max-h-[88%] overflow-auto rounded-t-[28px] bg-[#102019] p-5 pb-9 shadow-2xl"
-            >
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[.2em] text-[#2de3a1]">
-                    {panel === "room"
-                      ? "Together"
-                      : panel === "camera"
-                        ? "Visual search"
-                        : panel === "chat"
-                          ? "Ask Crave"
-                          : panel === "profile"
-                            ? "Taste intelligence"
-                            : "Your basket"}
-                  </p>
-                  <h2 className="text-2xl font-black">
-                    {panel === "room"
-                      ? "Find the group craving"
-                      : panel === "camera"
-                        ? "See it. Find it."
-                        : panel === "chat"
-                          ? "What are you in the mood for?"
-                          : panel === "profile"
-                            ? "Your feed knows you"
-                            : "Ready when you are"}
-                  </h2>
-                </div>
-                <button
-                  onClick={close}
-                  className="grid h-9 w-9 place-items-center rounded-full bg-white/10"
-                >
-                  <Icon name="close" size={18} />
-                </button>
-              </div>
-              {panel === "camera" && (
-                <div>
-                  {upload ? (
-                    <div className="space-y-4">
-                      <img
-                        src={upload}
-                        alt="Uploaded food"
-                        className="h-48 w-full rounded-2xl object-cover"
-                      />
-                      <div className="rounded-2xl bg-[#173027] p-4">
-                        <p className="text-xs font-bold text-[#2de3a1]">
-                          VISUAL MATCH · 94%
-                        </p>
-                        <p className="mt-1 text-lg font-black">
-                          Spicy Salmon Crunch
-                        </p>
-                        <p className="text-sm text-white/55">
-                          3 nearby matches on Careem · from AED 42
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          close();
-                          feedRef.current?.children[2]?.scrollIntoView({
-                            behavior: "smooth",
-                          });
-                        }}
-                        className="w-full rounded-xl bg-[#2de3a1] py-3 font-black text-[#07110d]"
-                      >
-                        Show similar dishes
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="grid h-52 cursor-pointer place-items-center rounded-2xl border border-dashed border-white/25 bg-white/5 text-center">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) setUpload(URL.createObjectURL(f));
-                        }}
-                      />
-                      <span>
-                        <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-[#2de3a1] text-[#07110d]">
-                          <Icon name="camera" />
-                        </span>
-                        <strong>Upload a food screenshot</strong>
-                        <small className="mt-1 block text-white/45">
-                          We&apos;ll find similar dishes nearby
-                        </small>
-                      </span>
-                    </label>
-                  )}
-                </div>
-              )}
-              {panel === "chat" && (
-                <div>
-                  <div className="mb-4 rounded-2xl bg-white/5 p-4 text-sm leading-6 text-white/70">
-                    I can search by craving, budget, dietary needs or delivery
-                    time—without replacing your feed.
-                  </div>
-                  {reply && (
-                    <div className="mb-4 rounded-2xl bg-[#17382c] p-4 text-sm leading-6 text-white">
-                      {reply}
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <textarea
-                      value={chat}
-                      onChange={(e) => setChat(e.target.value)}
-                      rows={2}
-                      className="min-w-0 flex-1 resize-none rounded-xl bg-white/10 p-3 text-sm outline-none"
-                    />
-                    <button
-                      onClick={ask}
-                      disabled={chatting}
-                      className="grid w-12 place-items-center rounded-xl bg-[#2de3a1] text-[#07110d] disabled:opacity-40"
-                    >
-                      <Icon name="send" size={20} />
-                    </button>
-                  </div>
-                </div>
-              )}
-              {panel === "room" && (
-                <TogetherPanel
-                  baseDish={initialDishes[0]}
-                  onCreateCart={(items) => {
-                    setBasket(items);
-                    setPanel("basket");
-                  }}
-                />
-              )}
-              {false && panel === "room" && (
-                <div>
-                  {!roomReady ? (
-                    <div>
-                      <div className="mb-4 flex -space-x-2">
-                        <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-[#5844d8] font-black">
-                          R
-                        </span>
-                        <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-[#ef755b] font-black">
-                          M
-                        </span>
-                        <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-white/10 text-white/40">
-                          +3
-                        </span>
-                      </div>
-                      <p className="mb-5 text-sm leading-6 text-white/60">
-                        Everyone swipes privately. When tastes overlap, the room
-                        reveals a match—no group-chat debate.
-                      </p>
-                      <button
-                        onClick={() => setRoomReady(true)}
-                        className="w-full rounded-xl bg-[#2de3a1] py-3 font-black text-[#07110d]"
-                      >
-                        Create room · CRAVE42
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-center">
-                      <p className="text-5xl">🎉</p>
-                      <p className="mt-3 text-xs font-bold text-[#2de3a1]">
-                        3-WAY MATCH
-                      </p>
-                      <h3 className="mt-1 text-2xl font-black">
-                        Truffle Smash
-                      </h3>
-                      <p className="mt-2 text-sm text-white/55">
-                        You, Reem and Mohammed all loved it.
-                      </p>
-                      <button
-                        onClick={() => {
-                          setBasket([initialDishes[0]]);
-                          setPanel("basket");
-                        }}
-                        className="mt-5 w-full rounded-xl bg-[#2de3a1] py-3 font-black text-[#07110d]"
-                      >
-                        Order together
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              {panel === "profile" && (
-                <div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl bg-white/5 p-4">
-                      <p className="text-xs text-white/45">Usually spend</p>
-                      <p className="mt-1 text-2xl font-black">AED 42</p>
-                      <p className="text-xs text-[#2de3a1]">Arabic food</p>
-                    </div>
-                    <div className="rounded-2xl bg-white/5 p-4">
-                      <p className="text-xs text-white/45">Top taste</p>
-                      <p className="mt-1 text-2xl font-black">Italian</p>
-                      <p className="text-xs text-[#2de3a1]">+18% affinity</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 rounded-2xl border border-[#2de3a1]/20 bg-[#0c2a20] p-4">
-                    <div className="flex gap-3">
-                      <Icon name="spark" />
-                      <div>
-                        <p className="font-bold">
-                          Why your feed looks like this
-                        </p>
-                        <p className="mt-1 text-sm leading-6 text-white/55">
-                          Order history sets a budget per cuisine. Likes, saves,
-                          skips and watch time continuously re-rank what comes
-                          next.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {panel === "basket" && (
-                <div>
-                  {basket.length === 0 ? (
-                    <p className="py-8 text-center text-sm text-white/55">
-                      Add a dish that makes you stop scrolling.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      {basket.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between rounded-xl bg-white/5 p-3"
-                        >
-                          <div>
-                            <p className="font-bold">{item.name}</p>
-                            <p className="text-xs text-white/50">
-                              {item.restaurant}
-                            </p>
-                          </div>
-                          <span className="text-sm font-bold">
-                            AED {item.price}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4">
-                    <div>
-                      <p className="text-xs text-white/45">Subtotal</p>
-                      <p className="text-2xl font-black">AED {total}</p>
-                    </div>
-                    <button
-                      disabled={!basket.length}
-                      onClick={() => setSplit(true)}
-                      className="rounded-xl bg-[#2de3a1] px-5 py-3 font-black text-[#07110d] disabled:opacity-30"
-                    >
-                      <Icon name="card" size={18} />{" "}
-                      <span className="ml-1">Split & checkout</span>
-                    </button>
-                  </div>
-                  {split && (
-                    <SplitVote
-                      basket={basket}
-                      total={total}
-                      onComplete={() => flash("Payment links sent")}
-                    />
-                  )}
-                </div>
-              )}
-            </aside>
+        {hint && (
+          <div className="pop pointer-events-none absolute bottom-6 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/50 px-3 py-1.5 text-[9.5px] font-bold text-white/80 backdrop-blur">
+            Tap again to bring back the details
           </div>
+        )}
+
+        {/* long-press menu */}
+        {menuDish && (
+          <div className="absolute inset-0 z-50 bg-black/60" onClick={() => setMenuDish(null)}>
+            <div onClick={(e) => e.stopPropagation()} className="sheet absolute inset-x-0 bottom-0 rounded-t-[20px] bg-[#102019] px-4 pb-8 pt-2">
+              <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/20" />
+              <p className="mb-2 truncate text-[10.5px] font-bold uppercase tracking-widest text-white/40">{menuDish.name}</p>
+              <MenuRow icon="eyeoff" title="Not interested" sub="Don't show this dish again" onClick={() => hideDishes(menuDish, "dish")} />
+              <MenuRow
+                icon="close"
+                title={`Don't recommend ${menuDish.restaurant}`}
+                sub="Hide everything from this restaurant"
+                onClick={() => hideDishes(menuDish, "restaurant")}
+              />
+              <MenuRow
+                icon="bookmark"
+                title={saved.has(menuDish.id) ? "Remove from hit list" : "Save to hit list"}
+                sub="Keep it for a later craving"
+                onClick={() => {
+                  save(menuDish);
+                  setMenuDish(null);
+                }}
+              />
+              {menuDish.uploadId && tokens[menuDish.uploadId] && (
+                <MenuRow icon="minus" title="Delete my video" sub="Remove it for everyone" onClick={() => void deleteUpload(menuDish)} />
+              )}
+              <button onClick={() => setMenuDish(null)} className="mt-2 w-full rounded-xl bg-white/10 py-3 text-[12px] font-bold">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {panel && (
+          <Sheet title={panelTitle[panel]} onClose={close}>
+            {panel === "chat" && (
+              <div>
+                <div className="hide-scrollbar max-h-[46vh] min-h-[120px] space-y-3 overflow-y-auto pr-1">
+                  {chat.length === 0 && (
+                    <div className="rounded-2xl bg-white/5 p-4 text-[12px] leading-6 text-white/75">
+                      Hi, I&apos;m Crave. Ask me for a recommendation or about a specific restaurant — I look things up on live Careem
+                      menus.
+                    </div>
+                  )}
+                  {chat.map((m, i) => (
+                    <div key={i} className={m.role === "user" ? "flex justify-end" : "flex"}>
+                      <div
+                        className={`max-w-[86%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-[1.45] ${m.role === "user" ? "rounded-br-md bg-[#2de3a1] font-semibold text-[#062a1c]" : "rounded-bl-md bg-white/10"}`}
+                      >
+                        {m.content}
+                        {m.dishIds && m.dishIds.length > 0 && (
+                          <div className="mt-2 flex flex-col gap-1.5">
+                            {m.dishIds
+                              .map((id) => catalog.find((d) => d.id === id))
+                              .filter((d): d is Dish => !!d)
+                              .slice(0, 3)
+                              .map((d) => (
+                                <button
+                                  key={d.id}
+                                  onClick={() => jumpTo(d)}
+                                  className="flex items-center gap-2 rounded-xl bg-black/30 px-2.5 py-1.5 text-left text-[11px] font-bold"
+                                >
+                                  <Icon name="play" filled size={12} />
+                                  <span className="min-w-0 flex-1 truncate">{d.name}</span>
+                                  <span className="text-white/60">AED {d.price}</span>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {chatBusy && <p className="text-[10.5px] font-semibold text-white/50">Crave is thinking…</p>}
+                  <div ref={chatEndRef} />
+                </div>
+                {chat.length === 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {chatSuggestions.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => void sendChat(s)}
+                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-bold"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {chat.length > 0 && chat[chat.length - 1].mode === "basic" && (
+                  <p className="mt-3 text-[9.5px] leading-4 text-white/35">
+                    Crave is answering without an AI model. Add an ANTHROPIC_API_KEY to the server for open-ended answers.
+                  </p>
+                )}
+                <div className="mt-3 flex gap-2">
+                  <input
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && void sendChat()}
+                    placeholder="Ask Crave anything about food…"
+                    className={inputClass + " h-11"}
+                  />
+                  <button
+                    onClick={() => void sendChat()}
+                    disabled={chatBusy || !chatInput.trim()}
+                    aria-label="Send"
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[#2de3a1] text-[#062a1c] disabled:opacity-40"
+                  >
+                    <Icon name="send" size={19} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {panel === "upload" && (
+              <div>
+                <div className="mb-3 flex rounded-full bg-white/10 p-1 text-[11.5px] font-bold">
+                  {(
+                    [
+                      ["restaurant", "I'm the restaurant"],
+                      ["customer", "I'm a customer"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => setForm((f) => ({ ...f, type: key }))}
+                      className={`flex-1 rounded-full py-1.5 transition ${form.type === key ? "bg-white text-[#062a1c]" : "text-white/70"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <label className="mb-3 grid cursor-pointer place-items-center overflow-hidden rounded-2xl border border-dashed border-white/25 bg-white/5 text-center">
+                  <input
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime"
+                    className="hidden"
+                    onChange={(e) => void pickFile(e.target.files?.[0])}
+                  />
+                  {filePreview ? (
+                    <video src={filePreview} muted playsInline autoPlay loop className="h-44 w-full object-cover" />
+                  ) : (
+                    <span className="py-8">
+                      <span className="mx-auto mb-2 grid h-11 w-11 place-items-center rounded-full bg-[#2de3a1] text-[#062a1c]">
+                        <Icon name="plus" />
+                      </span>
+                      <strong className="block text-[12px]">Choose a video</strong>
+                      <small className="text-white/45">MP4, WebM or MOV · up to 100 MB</small>
+                    </span>
+                  )}
+                </label>
+
+                <div className="space-y-2">
+                  <input
+                    className={inputClass}
+                    placeholder="Restaurant name *"
+                    maxLength={80}
+                    value={form.restaurant}
+                    onChange={(e) => setForm((f) => ({ ...f, restaurant: e.target.value }))}
+                  />
+                  <input
+                    className={inputClass}
+                    placeholder="Dish name *"
+                    maxLength={80}
+                    value={form.dish}
+                    onChange={(e) => setForm((f) => ({ ...f, dish: e.target.value }))}
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      className={inputClass}
+                      placeholder="Price (AED) *"
+                      inputMode="decimal"
+                      value={form.price}
+                      onChange={(e) => setForm((f) => ({ ...f, price: e.target.value.replace(/[^0-9.]/g, "") }))}
+                    />
+                    <select
+                      className={inputClass + " bg-[#1a3126]"}
+                      value={form.cuisine}
+                      onChange={(e) => setForm((f) => ({ ...f, cuisine: e.target.value as Cuisine }))}
+                    >
+                      {CUISINE_OPTIONS.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <textarea
+                    className={inputClass + " h-20 resize-none py-2"}
+                    placeholder="What is it? Describe the dish"
+                    maxLength={400}
+                    value={form.description}
+                    onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  />
+                  <input
+                    className={inputClass}
+                    placeholder="Ingredients, separated by commas"
+                    maxLength={300}
+                    value={form.ingredients}
+                    onChange={(e) => setForm((f) => ({ ...f, ingredients: e.target.value }))}
+                  />
+                  {form.type === "customer" && (
+                    <input
+                      className={inputClass}
+                      placeholder="Your name (optional)"
+                      maxLength={40}
+                      value={form.name}
+                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    />
+                  )}
+                </div>
+
+                {formError && <p className="mt-3 text-[12px] font-semibold text-[#ff8a8a]">{formError}</p>}
+                <button
+                  onClick={() => void submitUpload()}
+                  disabled={!canPost}
+                  className="mt-4 w-full rounded-xl bg-[#2de3a1] py-3 font-bold text-[#062a1c] disabled:opacity-40"
+                >
+                  {posting ? "Uploading…" : "Post video"}
+                </button>
+                <p className="mt-3 text-center text-[9.5px] leading-4 text-white/40">
+                  Everyone using this app will be able to see your video. Only upload videos you filmed or have permission to share.
+                </p>
+              </div>
+            )}
+
+            {panel === "search" && (
+              <div>
+                <div className="flex items-center gap-2 rounded-xl bg-white/10 px-3">
+                  <Icon name="search" size={18} />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && submitQuery()}
+                    placeholder="Search dishes, restaurants, cravings"
+                    className="h-11 min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-white/35"
+                  />
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button onClick={submitQuery} className="h-10 flex-1 rounded-lg bg-[#2de3a1] text-[12px] font-bold text-[#062a1c]">
+                    Search
+                  </button>
+                  <button onClick={askFromSearch} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-white/10 text-[12px] font-bold">
+                    <Icon name="spark" size={15} /> Ask Crave
+                  </button>
+                </div>
+
+                {!results && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {cravings.map((c) => (
+                      <button
+                        key={c.label}
+                        onClick={() => showResults(c.label, c.test)}
+                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11.5px] font-bold"
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {results && (
+                  <div className="mt-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-[10.5px] font-bold uppercase tracking-widest text-white/40">
+                        {results.dishes.length} for “{results.label}”
+                      </p>
+                      <button onClick={() => setResults(null)} className="text-[10.5px] font-bold text-[#2de3a1]">
+                        Clear
+                      </button>
+                    </div>
+                    {results.dishes.length === 0 ? (
+                      <p className="rounded-xl bg-white/5 p-4 text-[12px] text-white/60">
+                        Nothing in the feed matches that yet. Try Ask Crave — it can search Careem&apos;s live menus too.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {results.dishes.map((d) => (
+                          <div key={d.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-2">
+                            <button onClick={() => jumpTo(d)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                              {d.imageUrl ? (
+                                <img src={d.imageUrl} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                              ) : (
+                                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-white/10 text-[17px]">{emojiOf(d)}</span>
+                              )}
+                              <span className="min-w-0">
+                                <strong className="block truncate text-[12px]">{d.name}</strong>
+                                <small className="block truncate text-white/50">
+                                  {d.restaurant} · AED {d.price}
+                                </small>
+                              </span>
+                            </button>
+                            <button
+                              onClick={() => jumpTo(d)}
+                              className="shrink-0 rounded-lg bg-white/10 px-3 py-2 text-[10.5px] font-bold"
+                            >
+                              Watch
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button onClick={() => setPanel("camera")} className="mt-5 flex w-full items-center gap-3 rounded-xl bg-white/5 p-3 text-left">
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-white/10">
+                    <Icon name="camera" size={18} />
+                  </span>
+                  <span>
+                    <strong className="block text-[12px]">Search by photo</strong>
+                    <small className="text-white/45">Upload a food screenshot</small>
+                  </span>
+                </button>
+                {hidden.size > 0 && (
+                  <button
+                    onClick={() => {
+                      const none = new Set<string>();
+                      setHidden(none);
+                      rebuild(mode, follows, none);
+                      close();
+                      flash("Hidden dishes are back");
+                    }}
+                    className="mt-3 w-full rounded-xl bg-white/5 py-3 text-[12px] font-bold text-white/70"
+                  >
+                    Show {hidden.size} hidden dish{hidden.size === 1 ? "" : "es"} again
+                  </button>
+                )}
+              </div>
+            )}
+
+            {panel === "camera" && (
+              <div>
+                {upload ? (
+                  <div className="space-y-4">
+                    <img src={upload} alt="Uploaded food" className="h-48 w-full rounded-2xl object-cover" />
+                    <div className="rounded-2xl bg-[#173027] p-4">
+                      <p className="text-[10.5px] font-bold text-[#2de3a1]">VISUAL MATCH · PROTOTYPE</p>
+                      <p className="mt-1 text-[15px] font-bold">Oshi Pressed Sushi</p>
+                      <p className="text-[12px] text-white/55">Image matching is a mock-up: it always shows this dish.</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const target = catalog.find((d) => d.id === "sushi");
+                        if (target) jumpTo(target);
+                      }}
+                      className="w-full rounded-xl bg-[#2de3a1] py-3 font-bold text-[#062a1c]"
+                    >
+                      Show it in the feed
+                    </button>
+                  </div>
+                ) : (
+                  <label className="grid h-52 cursor-pointer place-items-center rounded-2xl border border-dashed border-white/25 bg-white/5 text-center">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) setUpload(URL.createObjectURL(f));
+                      }}
+                    />
+                    <span>
+                      <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-[#2de3a1] text-[#062a1c]">
+                        <Icon name="camera" />
+                      </span>
+                      <strong>Upload a food screenshot</strong>
+                      <small className="mt-1 block text-white/45">We&apos;ll find similar dishes nearby</small>
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
+
+            {panel === "room" && (
+              <TogetherPanel
+                baseDish={initialDishes[0]}
+                onCreateCart={(items) => {
+                  setBasket(items);
+                  setPanel("basket");
+                }}
+              />
+            )}
+
+            {panel === "friends" && friendsFor && (
+              <div>
+                <div className="mb-4 flex items-center gap-3 rounded-2xl bg-white/5 p-3">
+                  {friendsFor.imageUrl && <img src={friendsFor.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />}
+                  <div className="min-w-0">
+                    <p className="truncate font-bold">{friendsFor.name}</p>
+                    <p className="text-[10.5px] text-white/55">{friendsFor.restaurant}</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {(friendActivity[friendsFor.id] ?? []).map((a) => (
+                    <div key={a.name} className="flex items-center gap-3 rounded-xl bg-white/5 p-3">
+                      <span
+                        className="grid h-10 w-10 place-items-center rounded-full text-[12px] font-bold"
+                        style={{ background: friendColor[a.name] ?? `hsl(${hueOf(a.name)} 50% 40%)` }}
+                      >
+                        {a.name[0]}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[12px] font-bold">{a.name}</p>
+                        <p className="text-[10.5px] text-white/50">Ordered {a.when}</p>
+                      </div>
+                      <span className="text-[12px] text-[#ffd25e]">{stars(a.stars)}</span>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => openPanel("room")} className="mt-4 w-full rounded-xl bg-[#2de3a1] py-3 font-bold text-[#062a1c]">
+                  Order together
+                </button>
+                <p className="mt-4 text-center text-[9.5px] text-white/35">Sample friend activity for this prototype.</p>
+              </div>
+            )}
+
+            {panel === "reviews" && reviewFor && (
+              <div>
+                <div className="mb-4 flex items-center gap-3 rounded-2xl bg-white/5 p-3">
+                  {reviewFor.imageUrl && <img src={reviewFor.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />}
+                  <div className="min-w-0">
+                    <p className="truncate font-bold">{reviewFor.name}</p>
+                    <p className="text-[10.5px] text-white/55">{reviewFor.restaurant}</p>
+                  </div>
+                </div>
+
+                <div className="mb-4 rounded-2xl bg-white/5 p-3">
+                  <div className="mb-2 flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button
+                        key={n}
+                        aria-label={`${n} star${n === 1 ? "" : "s"}`}
+                        onClick={() => setDraftRating(n)}
+                        className={`text-[20px] leading-none ${n <= draftRating ? "text-[#ffd25e]" : "text-white/20"}`}
+                      >
+                        ★
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && postReview()}
+                      placeholder="Share what you thought…"
+                      className={inputClass}
+                    />
+                    <button
+                      onClick={postReview}
+                      disabled={!draft.trim()}
+                      className="rounded-lg bg-[#2de3a1] px-4 text-[12px] font-bold text-[#062a1c] disabled:opacity-40"
+                    >
+                      Post
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {reviewList(reviewFor).length === 0 && <p className="py-4 text-center text-[12px] text-white/50">No reviews yet — be the first.</p>}
+                  {reviewList(reviewFor).map((r, i) => (
+                    <div key={`${r.name}-${i}`} className="flex gap-3">
+                      <span
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[12px] font-bold"
+                        style={{ background: `hsl(${hueOf(r.name)} 50% 34%)` }}
+                      >
+                        {r.name[0]}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[12px] font-bold">
+                          {r.name} <span className="font-normal text-white/40">· {r.when}</span>
+                        </p>
+                        <p className="text-[9.5px] text-[#ffd25e]">{stars(r.rating)}</p>
+                        <p className="mt-0.5 text-[12px] leading-5 text-white/80">{r.text}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-5 text-center text-[9.5px] text-white/35">
+                  Sample reviews for this prototype. Reviews you post are saved on this device only.
+                </p>
+              </div>
+            )}
+
+            {panel === "hitlist" && (
+              <div>
+                {bagTabs}
+                {savedDishes.length === 0 ? (
+                  <p className="py-8 text-center text-[12px] text-white/55">Tap the bookmark on a dish to save it for a later craving.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {savedDishes.map((d) => (
+                      <div key={d.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-2">
+                        <button onClick={() => jumpTo(d)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                          {d.imageUrl ? (
+                            <img src={d.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />
+                          ) : (
+                            <span className="grid h-12 w-12 place-items-center rounded-lg bg-white/10 text-[17px]">{emojiOf(d)}</span>
+                          )}
+                          <span className="min-w-0">
+                            <strong className="block truncate text-[12px]">{d.name}</strong>
+                            <small className="text-white/50">
+                              {d.restaurant} · AED {d.price}
+                            </small>
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => toggleBag(d)}
+                          className="rounded-lg bg-[#2de3a1] px-3 py-2 text-[10.5px] font-bold text-[#062a1c]"
+                        >
+                          {basket.some((x) => x.id === d.id) ? "Remove" : "Add"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {panel === "basket" && (
+              <div>
+                {bagTabs}
+                {basket.length === 0 ? (
+                  <p className="py-8 text-center text-[12px] text-white/55">Add a dish that makes you stop scrolling.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {basket.map((item) => (
+                      <div key={item.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-2">
+                        {item.imageUrl ? (
+                          <img src={item.imageUrl} alt="" className="h-11 w-11 rounded-lg object-cover" />
+                        ) : (
+                          <span className="grid h-11 w-11 place-items-center rounded-lg bg-white/10 text-[17px]">{emojiOf(item)}</span>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[12px] font-bold">{item.name}</p>
+                          <p className="text-[10.5px] text-white/50">{item.restaurant}</p>
+                        </div>
+                        <span className="text-[12px] font-bold">AED {item.price}</span>
+                        <button
+                          aria-label={`Remove ${item.name}`}
+                          onClick={() => removeFromBag(item)}
+                          className="grid h-8 w-8 place-items-center rounded-full bg-white/10"
+                        >
+                          <Icon name="close" size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4">
+                  <div>
+                    <p className="text-[10.5px] text-white/45">Subtotal</p>
+                    <p className="text-[20px] font-bold">AED {total}</p>
+                  </div>
+                  <button
+                    disabled={!basket.length}
+                    onClick={() => setSplit(true)}
+                    className="rounded-xl bg-[#2de3a1] px-5 py-3 font-bold text-[#062a1c] disabled:opacity-30"
+                  >
+                    <Icon name="card" size={18} /> <span className="ml-1">Split & checkout</span>
+                  </button>
+                </div>
+                {split && <SplitVote basket={basket} total={total} onComplete={() => flash("Payment links sent")} />}
+              </div>
+            )}
+          </Sheet>
         )}
       </main>
     </div>

@@ -84,8 +84,8 @@ export function tasteScore(dish: Dish, profile: TasteProfile) {
     + (profile.saved.includes(dish.id) ? 7 : 0)
     + (profile.basketAdds.includes(dish.id) ? 10 : 0)
     - (profile.skipped.includes(dish.id) ? 14 : 0);
-  const quality = (dish.rating - 4.5) * 10;
-  const deliveryFit = clamp((35 - dish.deliveryMinutes) / 4, 0, 4);
+  const quality = ((dish.rating ?? 4.5) - 4.5) * 10;
+  const deliveryFit = clamp((35 - (dish.deliveryMinutes ?? 30)) / 4, 0, 4);
   const score = Math.round(62 + affinity * 2 + priceFit + dwellSignal + explicit + quality + deliveryFit);
   return clamp(score, 35, 99);
 }
