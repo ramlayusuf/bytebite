@@ -6,6 +6,7 @@ import type { Dish } from "@/types/dish";
 import {
   applyTasteSignal,
   emptyTasteProfile,
+  mergeCareemHistory,
   rankDishes,
   type TasteProfile,
   type TasteSignal,
@@ -219,7 +220,10 @@ function RailButton({
   );
 }
 
-function Media({ dish }: { dish: Dish }) {
+function Media({ dish, active }: { dish: Dish; active: boolean }) {
+  const embedUrl = dish.embedUrl?.includes("tiktok.com/player/")
+    ? dish.embedUrl.replace("?", "?embed_from=oembed&force_muted=1&")
+    : dish.embedUrl;
   if (dish.embedUrl)
     return (
       <>
@@ -228,12 +232,28 @@ function Media({ dish }: { dish: Dish }) {
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
         />
-        <iframe
-          src={dish.embedUrl}
-          title={`${dish.restaurant} review by ${dish.reviewCreator}`}
-          allow="autoplay; encrypted-media; picture-in-picture"
-          className="review-embed absolute inset-0 h-full w-full border-0"
-        />
+        {active && (
+          <iframe
+            src={embedUrl}
+            title={`${dish.restaurant} review by ${dish.reviewCreator}`}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            onLoad={(event) => {
+              const player = event.currentTarget.contentWindow;
+              window.setTimeout(() => {
+                player?.postMessage(
+                  { type: "mute", value: true, "x-tiktok-player": true },
+                  "https://www.tiktok.com",
+                );
+                player?.postMessage(
+                  { type: "play", value: null, "x-tiktok-player": true },
+                  "https://www.tiktok.com",
+                );
+              }, 350);
+            }}
+            className="review-embed absolute inset-0 h-full w-full border-0"
+          />
+        )}
       </>
     );
   if (dish.videoUrl)
@@ -899,6 +919,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     [reply, setReply] = useState(""),
     [chatting, setChatting] = useState(false),
     [upload, setUpload] = useState(""),
+    [historyOrders, setHistoryOrders] = useState(0),
     [split, setSplit] = useState(false),
     [groupPlan, setGroupPlan] = useState<GroupPlan | null>(null),
     [committingGroup, setCommittingGroup] = useState(false),
@@ -924,12 +945,24 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     active = useRef(0),
     viewAt = useRef(0),
     profileRef = useRef(profile),
+    historyRequested = useRef(false),
     toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined),
     burstSeq = useRef(0);
   const total = useMemo(
     () => basket.reduce((s, x) => s + x.price, 0),
     [basket],
   );
+  const usualSpend = useMemo(() => {
+    const samples = Object.values(profile.spendByCuisine ?? {}).flat();
+    if (!samples.length) return null;
+    return Math.round(
+      samples.reduce((sum, amount) => sum + amount, 0) / samples.length,
+    );
+  }, [profile.spendByCuisine]);
+  const topCuisine = useMemo(() => {
+    const entries = Object.entries(profile.cuisineAffinity ?? {});
+    return entries.sort((a, b) => Number(b[1]) - Number(a[1]))[0]?.[0];
+  }, [profile.cuisineAffinity]);
   useEffect(() => {
     viewAt.current = performance.now();
     const id = setTimeout(() => {
@@ -961,6 +994,26 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
         localStorage.setItem("crave-taste-profile", JSON.stringify(profile));
       } catch {}
   }, [profile, loaded]);
+  useEffect(() => {
+    if (!loaded || historyRequested.current) return;
+    historyRequested.current = true;
+    fetch("/api/careem/history-profile", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.json();
+      })
+      .then((data) => {
+        if (!data?.profile) return;
+        setHistoryOrders(Number(data.ordersAnalyzed ?? 0));
+        setProfile((current) => {
+          const next = mergeCareemHistory(current, data.profile);
+          profileRef.current = next;
+          setFeed(rankDishes(initialDishes, next));
+          return next;
+        });
+      })
+      .catch(() => undefined);
+  }, [initialDishes, loaded]);
   const flash = (m: string) => {
     clearTimeout(toastTimer.current);
     setToast(m);
@@ -1323,15 +1376,22 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
               const saveCount =
                 reviews * 0.9 + (saved.has(dish.id) ? 1 : 0);
               const isExpanded = expanded === dish.id;
+              const creator = (dish.reviewCreator || dish.restaurant).replace(
+                /^@/,
+                "",
+              );
+              const isRestaurantPost =
+                !dish.reviewCreator ||
+                dish.tags.includes("From the restaurant");
               const soundLine = dish.reviewCreator
-                ? `${dish.reviewCreator} · ${dish.reviewPlatform} review`
+                ? `${creator} · ${dish.reviewPlatform} review`
                 : `Fresh from the kitchen · ${dish.restaurant}`;
               return (
                 <section
                   key={dish.id}
                   className="relative h-full snap-start snap-always overflow-hidden bg-ink"
                 >
-                  <Media dish={dish} />
+                  <Media dish={dish} active={index === activeIndex} />
                   {/* Scrims: keep every line of text readable over bright food */}
                   <div className="pointer-events-none absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-black/60 to-transparent" />
                   <div
@@ -1376,24 +1436,24 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     <div className="relative mb-2">
                       <img
                         src={dish.imageUrl}
-                        alt={dish.restaurant}
+                        alt={creator}
                         className="h-12 w-12 rounded-full border-2 border-white object-cover"
                       />
                       <button
                         aria-label={
-                          following.has(dish.restaurant)
-                            ? `Unfollow ${dish.restaurant}`
-                            : `Follow ${dish.restaurant}`
+                          following.has(creator)
+                            ? `Unfollow ${creator}`
+                            : `Follow ${creator}`
                         }
                         onClick={() => {
-                          const yes = !following.has(dish.restaurant);
-                          toggle(setFollowing, dish.restaurant);
-                          if (yes) flash(`Following ${dish.restaurant}`);
+                          const yes = !following.has(creator);
+                          toggle(setFollowing, creator);
+                          if (yes) flash(`Following ${creator}`);
                         }}
-                        className={`absolute -bottom-2.5 left-1/2 grid h-6 w-6 -translate-x-1/2 place-items-center rounded-full ${following.has(dish.restaurant) ? "bg-white text-careem-deep" : "bg-careem text-ink"}`}
+                        className={`absolute -bottom-2.5 left-1/2 grid h-6 w-6 -translate-x-1/2 place-items-center rounded-full ${following.has(creator) ? "bg-white text-careem-deep" : "bg-careem text-ink"}`}
                       >
                         <Icon
-                          name={following.has(dish.restaurant) ? "check" : "plus"}
+                          name={following.has(creator) ? "check" : "plus"}
                           size={14}
                           stroke={3.2}
                         />
@@ -1456,6 +1516,9 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                         <p className="truncate text-[14px] font-semibold leading-5">
                           {dish.name}
                         </p>
+                        <p className="truncate text-[11px] leading-4 text-ink/55">
+                          Order from {dish.restaurant}
+                        </p>
                         <p className="text-[13px] leading-5 text-ink/65">
                           <strong className="font-bold text-ink">
                             AED {dish.price}
@@ -1473,13 +1536,15 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     </div>
 
                     <p className="flex items-center gap-1.5 text-[17px] font-bold leading-6">
-                      {dish.restaurant}
-                      <span
-                        title="On Careem"
-                        className="grid h-4 w-4 place-items-center rounded-full bg-careem text-ink"
-                      >
-                        <Icon name="check" size={11} stroke={3.5} />
-                      </span>
+                      {creator}
+                      {isRestaurantPost && (
+                        <span
+                          title="Posted by the restaurant"
+                          className="grid h-4 w-4 place-items-center rounded-full bg-careem text-ink"
+                        >
+                          <Icon name="check" size={11} stroke={3.5} />
+                        </span>
+                      )}
                       <span className="text-[14px] font-medium text-white/85">
                         · <span className="text-[#ffd54a]">★</span>{" "}
                         {dish.rating}
@@ -1680,7 +1745,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-[15px] font-semibold">
-                          {panelDish.reviewCreator}
+                          {panelDish.reviewCreator?.replace(/^@/, "")}
                         </span>
                         <span className="block text-[13px] text-ink/60">
                           Watch the full review on {panelDish.reviewPlatform}
@@ -1816,16 +1881,22 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-2xl bg-mist p-4">
                       <p className="text-[13px] text-ink/60">Usually spend</p>
-                      <p className="mt-1 text-2xl font-bold">AED 42</p>
+                      <p className="mt-1 text-2xl font-bold">
+                        {usualSpend ? `AED ${usualSpend}` : "Learning…"}
+                      </p>
                       <p className="text-[13px] font-semibold text-careem-deep">
-                        Arabic food
+                        Per dish from your history
                       </p>
                     </div>
                     <div className="rounded-2xl bg-mist p-4">
                       <p className="text-[13px] text-ink/60">Top taste</p>
-                      <p className="mt-1 text-2xl font-bold">Italian</p>
+                      <p className="mt-1 text-2xl font-bold">
+                        {topCuisine ?? "Learning…"}
+                      </p>
                       <p className="text-[13px] font-semibold text-careem-deep">
-                        +18% affinity
+                        {historyOrders
+                          ? `${historyOrders} Careem order${historyOrders === 1 ? "" : "s"} analysed`
+                          : "Likes and watch time update this"}
                       </p>
                     </div>
                   </div>

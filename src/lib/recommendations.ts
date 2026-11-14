@@ -2,6 +2,7 @@ import type { Cuisine, Dish } from "@/types/dish";
 
 export type TasteProfile = {
   cuisineAffinity: Partial<Record<Cuisine, number>>;
+  restaurantAffinity: Record<string, number>;
   dwellMs: Record<string, number>;
   liked: string[];
   saved: string[];
@@ -9,19 +10,21 @@ export type TasteProfile = {
   basketAdds: string[];
   priceSamples: number[];
   spendByCuisine: Partial<Record<Cuisine, number[]>>;
+  careemHistoryVersion?: string;
 };
 
 export type TasteSignal = "like" | "unlike" | "save" | "unsave" | "skip" | "basket" | "dwell";
 
 export const emptyTasteProfile = (): TasteProfile => ({
   cuisineAffinity: {},
+  restaurantAffinity: {},
   dwellMs: {},
   liked: [],
   saved: [],
   skipped: [],
   basketAdds: [],
   priceSamples: [],
-  spendByCuisine: { Arabic: [34, 39, 42], Japanese: [52, 61], Italian: [48, 55] },
+  spendByCuisine: {},
 });
 
 const uniqueAdd = (items: string[], id: string) => items.includes(id) ? items : [...items, id];
@@ -32,6 +35,7 @@ export function applyTasteSignal(profile: TasteProfile, dish: Dish, signal: Tast
   const next: TasteProfile = {
     ...profile,
     cuisineAffinity: { ...profile.cuisineAffinity },
+    restaurantAffinity: { ...(profile.restaurantAffinity ?? {}) },
     dwellMs: { ...profile.dwellMs },
     liked: [...profile.liked],
     saved: [...profile.saved],
@@ -70,14 +74,16 @@ export function applyTasteSignal(profile: TasteProfile, dish: Dish, signal: Tast
   return next;
 }
 
-export function tasteScore(dish: Dish, profile: TasteProfile) {
+function rankingScore(dish: Dish, profile: TasteProfile) {
   const affinity = profile.cuisineAffinity[dish.cuisine] ?? 0;
+  const restaurantAffinity =
+    profile.restaurantAffinity?.[dish.restaurant.toLowerCase()] ?? 0;
   const cuisineSpend = profile.spendByCuisine?.[dish.cuisine] ?? [];
   const samples = cuisineSpend.length ? cuisineSpend : profile.priceSamples;
   const averagePrice = samples.length
     ? samples.reduce((sum, price) => sum + price, 0) / samples.length
     : 48;
-  const priceFit = clamp(8 - Math.abs(dish.price - averagePrice) / 4, 0, 8);
+  const priceFit = clamp(14 - Math.abs(dish.price - averagePrice) / 2.5, 0, 14);
   const dwell = profile.dwellMs[dish.id] ?? 0;
   const dwellSignal = dwell >= 10_000 ? 7 : dwell >= 5_000 ? 5 : dwell >= 2_500 ? 2 : 0;
   const explicit = (profile.liked.includes(dish.id) ? 12 : 0)
@@ -86,8 +92,20 @@ export function tasteScore(dish: Dish, profile: TasteProfile) {
     - (profile.skipped.includes(dish.id) ? 14 : 0);
   const quality = (dish.rating - 4.5) * 10;
   const deliveryFit = clamp((35 - dish.deliveryMinutes) / 4, 0, 4);
-  const score = Math.round(62 + affinity * 2 + priceFit + dwellSignal + explicit + quality + deliveryFit);
-  return clamp(score, 35, 99);
+  return (
+    62 +
+      affinity * 3.5 +
+      restaurantAffinity * 2.5 +
+      priceFit +
+      dwellSignal +
+      explicit +
+      quality +
+      deliveryFit
+  );
+}
+
+export function tasteScore(dish: Dish, profile: TasteProfile) {
+  return clamp(Math.round(rankingScore(dish, profile)), 35, 99);
 }
 
 export function tasteReason(dish: Dish, profile: TasteProfile) {
@@ -103,5 +121,64 @@ export function tasteReason(dish: Dish, profile: TasteProfile) {
 }
 
 export function rankDishes(dishes: Dish[], profile: TasteProfile) {
-  return [...dishes].sort((a, b) => tasteScore(b, profile) - tasteScore(a, profile));
+  return [...dishes].sort((a, b) => {
+    const scoreDifference = rankingScore(b, profile) - rankingScore(a, profile);
+    if (scoreDifference) return scoreDifference;
+    const spend = profile.spendByCuisine?.[a.cuisine] ?? [];
+    const average = spend.length
+      ? spend.reduce((sum, amount) => sum + amount, 0) / spend.length
+      : 48;
+    return Math.abs(a.price - average) - Math.abs(b.price - average);
+  });
+}
+
+export function mergeCareemHistory(
+  profile: TasteProfile,
+  history: Partial<TasteProfile>,
+): TasteProfile {
+  if (
+    history.careemHistoryVersion &&
+    history.careemHistoryVersion === profile.careemHistoryVersion
+  )
+    return profile;
+  const cuisineAffinity = { ...profile.cuisineAffinity };
+  for (const [cuisine, value] of Object.entries(
+    history.cuisineAffinity ?? {},
+  ))
+    cuisineAffinity[cuisine as Cuisine] = clamp(
+      (cuisineAffinity[cuisine as Cuisine] ?? 0) + Number(value),
+      -8,
+      12,
+    );
+
+  const restaurantAffinity = { ...(profile.restaurantAffinity ?? {}) };
+  for (const [restaurant, value] of Object.entries(
+    history.restaurantAffinity ?? {},
+  ))
+    restaurantAffinity[restaurant] = clamp(
+      (restaurantAffinity[restaurant] ?? 0) + Number(value),
+      0,
+      12,
+    );
+
+  const spendByCuisine = { ...profile.spendByCuisine };
+  for (const [cuisine, values] of Object.entries(
+    history.spendByCuisine ?? {},
+  ))
+    spendByCuisine[cuisine as Cuisine] = [
+      ...((values as number[]) ?? []),
+      ...(spendByCuisine[cuisine as Cuisine] ?? []),
+    ].slice(-12);
+
+  return {
+    ...profile,
+    cuisineAffinity,
+    restaurantAffinity,
+    spendByCuisine,
+    priceSamples: [
+      ...(history.priceSamples ?? []),
+      ...profile.priceSamples,
+    ].slice(-20),
+    careemHistoryVersion: history.careemHistoryVersion,
+  };
 }
