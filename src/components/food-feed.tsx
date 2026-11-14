@@ -8,7 +8,7 @@ import { applyTasteSignal, emptyTasteProfile, rankDishes, type TasteProfile, typ
 import { Icon, type IconName } from "./icon";
 import { SplitVote, TogetherPanel } from "./group-order";
 
-type Panel = "basket" | "hitlist" | "search" | "camera" | "room" | "reviews" | "friends" | "chat" | "upload" | null;
+type Panel = "basket" | "hitlist" | "credits" | "search" | "camera" | "room" | "reviews" | "friends" | "chat" | "upload" | null;
 type Mode = "following" | "for-you";
 type Flight = { id: number; x: number; y: number; dx: number; dy: number; img?: string; emoji?: string };
 type ChatMsg = { role: "user" | "assistant"; content: string; tools?: string[]; dishIds?: string[]; mode?: string };
@@ -39,6 +39,7 @@ const itemDish = (d: Dish, it: { name: string; price: number }, i: number): Dish
   price: it.price,
   items: undefined,
 });
+const priceText = (d: Dish) => (d.priceKnown === false ? "Price at checkout" : `AED ${d.price}`);
 const compact = (n: number) =>
   n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "")}K` : String(n);
 const hueOf = (s: string) => [...s].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
@@ -120,7 +121,7 @@ const friendColor: Record<string, string> = { Reem: "#5844d8", Mohammed: "#ef755
 const cravings: { label: string; test: (d: Dish) => boolean }[] = [
   { label: "Something cheesy", test: (d) => /chees|mozzarella|parmesan|cheddar/i.test(`${d.description} ${(d.ingredients ?? []).join(" ")}`) },
   { label: "Healthy lunch", test: (d) => ["Japanese", "Arabic", "Asian"].includes(d.cuisine) },
-  { label: "Under AED 45", test: (d) => d.price <= 45 },
+  { label: "Under AED 45", test: (d) => d.priceKnown !== false && d.price <= 45 },
   { label: "Sweet tooth", test: (d) => d.cuisine === "Dessert" },
   { label: "Comfort food", test: (d) => ["Burgers", "Italian", "Indian"].includes(d.cuisine) },
 ];
@@ -129,6 +130,7 @@ const chatSuggestions = ["What's good for AED 45?", "I want something cheesy in 
 const panelTitle: Record<Exclude<Panel, null>, string> = {
   basket: "Your bag",
   hitlist: "Your hit list",
+  credits: "Your credits",
   search: "What are you craving?",
   camera: "See it. Find it.",
   room: "Eat together",
@@ -259,43 +261,29 @@ function RailButton({
 
 function MenuRow({ icon, title, sub, onClick }: { icon: IconName; title: string; sub: string; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="flex w-full items-center gap-3 rounded-xl p-3 text-left active:bg-white/10">
-      <span className="grid h-10 w-10 place-items-center rounded-full bg-white/10">
+    <button onClick={onClick} className="flex w-full items-center gap-3 rounded-xl p-3 text-left active:bg-[#eaf2f8]">
+      <span className="grid h-10 w-10 place-items-center rounded-full bg-[#eaf2f8]">
         <Icon name={icon} size={19} />
       </span>
       <span>
         <strong className="block text-[13px]">{title}</strong>
-        <small className="text-white/50">{sub}</small>
+        <small className="text-[#7a8fa0]">{sub}</small>
       </span>
     </button>
   );
 }
 
-function Sheet({
-  title,
-  onClose,
-  light = false,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  light?: boolean;
-  children: React.ReactNode;
-}) {
+function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="absolute inset-0 z-50 bg-black/60" onClick={onClose}>
       <aside
         onClick={(e) => e.stopPropagation()}
-        className={`sheet absolute inset-x-0 bottom-0 max-h-[88%] overflow-auto rounded-t-[20px] px-4 pb-8 pt-2 shadow-2xl ${light ? "bg-white text-[#0b2230]" : "bg-[#102019]"}`}
+        className="sheet absolute inset-x-0 bottom-0 max-h-[88%] overflow-auto rounded-t-[20px] bg-white px-4 pb-8 pt-2 text-[#0b2230] shadow-2xl"
       >
-        <div className={`mx-auto mb-2 h-1 w-9 rounded-full ${light ? "bg-[#0b2230]/15" : "bg-white/20"}`} />
+        <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-[#0b2230]/15" />
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-[15px] font-bold">{title}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className={`grid h-8 w-8 place-items-center rounded-full ${light ? "bg-[#eaf2f8]" : "bg-white/10"}`}
-          >
+          <button onClick={onClose} aria-label="Close" className="grid h-8 w-8 place-items-center rounded-full bg-[#eaf2f8]">
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -307,7 +295,7 @@ function Sheet({
 
 const lightInput =
   "h-10 w-full min-w-0 rounded-lg bg-[#eef4f9] px-3 text-[12px] text-[#0b2230] outline-none placeholder:text-[#8aa0b2] focus:ring-2 focus:ring-[#4cc9f0]/50";
-const inputClass = "h-10 w-full min-w-0 rounded-lg bg-white/10 px-3 text-[12px] outline-none placeholder:text-white/35";
+const inputClass = lightInput;
 
 /* ---------- the feed ---------- */
 
@@ -337,6 +325,8 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
   const [bump, setBump] = useState(false);
   const [toast, setToast] = useState("");
   const [openItems, setOpenItems] = useState<string | null>(null);
+  const [credits, setCredits] = useState<{ earned: number; spent: number; balance: number; vouchers: number; perOrder: number; perVoucher: number; uploads: { id: string; dish: string; restaurant: string; orders: number; credits: number }[] } | null>(null);
+  const [useFreeDelivery, setUseFreeDelivery] = useState(false);
   const [progress, setProgress] = useState({ t: 0, d: 0 });
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [panel, setPanel] = useState<Panel>(null);
@@ -849,6 +839,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
       body.set("description", form.description);
       body.set("ingredients", form.type === "restaurant" ? form.ingredients : "");
       body.set("uploaderName", form.name);
+      body.set("clientId", clientIdRef.current);
       const r = await fetch("/api/uploads", { method: "POST", body });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error);
@@ -862,7 +853,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
       requestAnimationFrame(() => feedRef.current?.scrollTo({ top: 0 }));
       resetUpload();
       close();
-      flash("Your video is live");
+      flash("Your video is live · you earn credits on every order");
     } catch (e) {
       setFormError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -890,19 +881,63 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     openPanel("friends");
   };
 
+  /* creator credits: refresh the balance, and report an order so the video makers get paid */
+  const refreshCredits = async () => {
+    if (!clientIdRef.current || !Object.keys(tokens).length) return;
+    try {
+      const r = await fetch("/api/credits", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tokens, clientId: clientIdRef.current }),
+      });
+      if (r.ok) setCredits(await r.json());
+    } catch {}
+  };
+  const placeOrder = async () => {
+    const uploadIds = [
+      ...new Set(basket.map((d) => d.id.replace(/#\d+$/, "")).filter((id) => id.startsWith("up-")).map((id) => id.slice(3))),
+    ];
+    const free = useFreeDelivery;
+    try {
+      if (uploadIds.length)
+        await fetch("/api/orders", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ uploadIds, clientId: clientIdRef.current }),
+        });
+      if (free)
+        await fetch("/api/credits/redeem", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ tokens, clientId: clientIdRef.current }),
+        });
+    } catch {}
+    setBasket([]);
+    setUseFreeDelivery(false);
+    close();
+    flash(free ? "Order placed · delivery was free" : "Order placed · payment links sent");
+    void refreshCredits();
+  };
+
+  useEffect(() => {
+    if (loaded && (panel === "credits" || panel === "basket")) void refreshCredits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel, loaded, tokens]);
+
   const savedDishes = catalog.filter((d) => saved.has(d.id));
   const bagTabs = (
-    <div className="mb-3 flex rounded-full bg-white/10 p-1 text-[11.5px] font-bold">
+    <div className="mb-3 flex rounded-full bg-[#e8f1f8] p-1 text-[11.5px] font-bold">
       {(
         [
           ["basket", `Bag (${basket.length})`],
           ["hitlist", `Hit list (${savedDishes.length})`],
+          ["credits", `Credits${credits ? ` (${credits.balance})` : ""}`],
         ] as const
       ).map(([key, label]) => (
         <button
           key={key}
           onClick={() => setPanel(key)}
-          className={`flex-1 rounded-full py-1.5 transition ${panel === key ? "bg-white text-[#062a1c]" : "text-white/70"}`}
+          className={`flex-1 rounded-full py-1.5 transition ${panel === key ? "bg-white text-[#0b2230] shadow-sm" : "text-[#5b7083]"}`}
         >
           {label}
         </button>
@@ -917,24 +952,26 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
         ref={screenRef}
         className={`phone-screen relative h-full w-full select-none overflow-hidden bg-black ${clean ? "clean" : ""}`}
       >
-        {/* top bar: Careem mark · Following  For You · assistant + search */}
+        {/* top bar: Careem icon · Following | For You · assistant + search */}
         <header className="hud top-bar pointer-events-none absolute inset-x-0 top-0 z-30 grid grid-cols-[1fr_auto_1fr] items-center px-4">
           <div className="pointer-events-auto flex items-center">
             <img src="/careem-icon.svg" alt="Careem" className="h-7 w-7" />
           </div>
-          <div className="pointer-events-auto flex gap-5" style={{ textShadow: "0 1px 8px rgba(0,0,0,.7)" }}>
-            {(["following", "for-you"] as Mode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => {
-                  setMode(m);
-                  rebuild(m, follows);
-                }}
-                className={`flex flex-col items-center text-[11.5px] font-bold transition ${mode === m ? "text-white" : "text-white/60"}`}
-              >
-                {m === "following" ? "Following" : "For You"}
-                <span className={`mt-1 h-[2px] w-5 rounded-full ${mode === m ? "bg-white" : "bg-transparent"}`} />
-              </button>
+          <div className="pointer-events-auto flex items-start gap-4" style={{ textShadow: "0 1px 8px rgba(0,0,0,.7)" }}>
+            {(["following", "for-you"] as Mode[]).map((m, mi) => (
+              <div key={m} className="flex items-start gap-4">
+                {mi === 1 && <span aria-hidden className="mt-1 h-3.5 w-px bg-white/30" />}
+                <button
+                  onClick={() => {
+                    setMode(m);
+                    rebuild(m, follows);
+                  }}
+                  className={`flex flex-col items-center text-[13px] font-bold transition ${mode === m ? "text-white" : "text-white/60"}`}
+                >
+                  {m === "following" ? "Following" : "For You"}
+                  <span className={`mt-1 h-[2px] w-5 rounded-full ${mode === m ? "bg-white" : "bg-transparent"}`} />
+                </button>
+              </div>
             ))}
           </div>
           <div className="pointer-events-auto flex justify-end gap-0.5 text-white drop-shadow-[0_1px_4px_rgba(0,0,0,.6)]">
@@ -1177,7 +1214,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     style={{ bottom: "calc(var(--nav-h) + 10px)", textShadow: "0 1px 8px rgba(0,0,0,.75)" }}
                   >
                     <p className="text-[12.5px] font-bold">
-                      {multi ? `${dish.items?.length} dishes · from AED ${Math.min(...(dish.items ?? []).map((x) => x.price))}` : `AED ${dish.price}`}
+                      {multi ? `${dish.items?.length} dishes · from AED ${Math.min(...(dish.items ?? []).map((x) => x.price))}` : priceText(dish)}
                     </p>
                     {multi ? (
                       <button
@@ -1260,11 +1297,11 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
 
         {/* bottom bar: TikTok-style, black, slim and small */}
         <nav className="hud tabbar absolute inset-x-0 bottom-0 z-40 flex items-start justify-around bg-black px-1 pt-1.5 text-white/60">
-          <button className="flex w-14 flex-col items-center gap-0.5 text-[8.5px] font-bold text-white">
+          <button className="flex w-16 flex-col items-center gap-0.5 whitespace-nowrap text-[8.5px] font-bold text-white">
             <Icon name="home" size={18} filled />
             Discover
           </button>
-          <button onClick={() => openPanel("room")} className="flex w-14 flex-col items-center gap-0.5 text-[8.5px] font-bold">
+          <button onClick={() => openPanel("room")} className="flex w-16 flex-col items-center gap-0.5 whitespace-nowrap text-[8.5px] font-bold">
             <Icon name="users" size={18} />
             Together
           </button>
@@ -1279,17 +1316,17 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
             ref={bagRef}
             onClick={() => openPanel("basket")}
             aria-label="Open bag"
-            className={`relative flex w-14 flex-col items-center gap-0.5 text-[8.5px] font-bold ${bump ? "bump" : ""}`}
+            className={`relative flex w-16 flex-col items-center gap-0.5 whitespace-nowrap text-[8.5px] font-bold ${bump ? "bump" : ""}`}
           >
             <Icon name="bag" size={18} />
             Bag
             {basket.length > 0 && (
-              <span className="absolute right-2.5 top-[-3px] grid h-[14px] min-w-[14px] place-items-center rounded-full bg-[#2de3a1] px-1 text-[8.5px] font-bold text-[#062a1c]">
+              <span className="absolute right-3 top-[-3px] grid h-[14px] min-w-[14px] place-items-center rounded-full bg-[#2de3a1] px-1 text-[8.5px] font-bold text-[#062a1c]">
                 {basket.length}
               </span>
             )}
           </button>
-          <button onClick={() => openPanel("camera")} className="flex w-14 flex-col items-center gap-0.5 text-[8.5px] font-bold">
+          <button onClick={() => openPanel("camera")} className="flex w-16 flex-col items-center gap-0.5 whitespace-nowrap text-[8.5px] font-bold">
             <Icon name="camera" size={18} />
             Find dish
           </button>
@@ -1309,9 +1346,9 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
         {/* long-press menu */}
         {menuDish && (
           <div className="absolute inset-0 z-50 bg-black/60" onClick={() => setMenuDish(null)}>
-            <div onClick={(e) => e.stopPropagation()} className="sheet absolute inset-x-0 bottom-0 rounded-t-[20px] bg-[#102019] px-4 pb-8 pt-2">
-              <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/20" />
-              <p className="mb-2 truncate text-[10.5px] font-bold uppercase tracking-widest text-white/40">{menuDish.name}</p>
+            <div onClick={(e) => e.stopPropagation()} className="sheet absolute inset-x-0 bottom-0 rounded-t-[20px] bg-white text-[#0b2230] px-4 pb-8 pt-2">
+              <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-[#dfeaf3]" />
+              <p className="mb-2 truncate text-[10.5px] font-bold uppercase tracking-widest text-[#7a8fa0]">{menuDish.name}</p>
               <MenuRow
                 icon="eye"
                 title="Clear display"
@@ -1340,7 +1377,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
               {menuDish.uploadId && tokens[menuDish.uploadId] && (
                 <MenuRow icon="minus" title="Delete my video" sub="Remove it for everyone" onClick={() => void deleteUpload(menuDish)} />
               )}
-              <button onClick={() => setMenuDish(null)} className="mt-2 w-full rounded-xl bg-white/10 py-3 text-[12px] font-bold">
+              <button onClick={() => setMenuDish(null)} className="mt-2 w-full rounded-xl bg-[#eaf2f8] py-3 text-[12px] font-bold">
                 Cancel
               </button>
             </div>
@@ -1348,12 +1385,12 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
         )}
 
         {panel && (
-          <Sheet title={panelTitle[panel]} onClose={close} light={panel === "friends" || panel === "upload"}>
+          <Sheet title={panelTitle[panel]} onClose={close}>
             {panel === "chat" && (
               <div>
                 <div className="hide-scrollbar max-h-[46vh] min-h-[120px] space-y-3 overflow-y-auto pr-1">
                   {chat.length === 0 && (
-                    <div className="rounded-2xl bg-white/5 p-4 text-[12px] leading-6 text-white/75">
+                    <div className="rounded-2xl bg-[#f3f8fc] p-4 text-[12px] leading-6 text-[#2a4255]">
                       Hi, I&apos;m Crave. Ask me for a recommendation or about a specific restaurant — I look things up on live Careem
                       menus.
                     </div>
@@ -1361,7 +1398,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                   {chat.map((m, i) => (
                     <div key={i} className={m.role === "user" ? "flex justify-end" : "flex"}>
                       <div
-                        className={`max-w-[86%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-[1.45] ${m.role === "user" ? "rounded-br-md bg-[#2de3a1] font-semibold text-[#062a1c]" : "rounded-bl-md bg-white/10"}`}
+                        className={`max-w-[86%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-[1.45] ${m.role === "user" ? "rounded-br-md bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] font-semibold text-[#062a1c]" : "rounded-bl-md bg-[#eaf2f8]"}`}
                       >
                         {m.content}
                         {m.dishIds && m.dishIds.length > 0 && (
@@ -1374,11 +1411,11 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                                 <button
                                   key={d.id}
                                   onClick={() => jumpTo(d)}
-                                  className="flex items-center gap-2 rounded-xl bg-black/30 px-2.5 py-1.5 text-left text-[11px] font-bold"
+                                  className="flex items-center gap-2 rounded-xl bg-[#e4eef6] px-2.5 py-1.5 text-left text-[11px] font-bold"
                                 >
                                   <Icon name="play" filled size={12} />
                                   <span className="min-w-0 flex-1 truncate">{d.name}</span>
-                                  <span className="text-white/60">AED {d.price}</span>
+                                  <span className="text-[#5b7083]">{priceText(d)}</span>
                                 </button>
                               ))}
                           </div>
@@ -1386,7 +1423,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                       </div>
                     </div>
                   ))}
-                  {chatBusy && <p className="text-[10.5px] font-semibold text-white/50">Crave is thinking…</p>}
+                  {chatBusy && <p className="text-[10.5px] font-semibold text-[#7a8fa0]">Crave is thinking…</p>}
                   <div ref={chatEndRef} />
                 </div>
                 {chat.length === 0 && (
@@ -1395,7 +1432,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                       <button
                         key={s}
                         onClick={() => void sendChat(s)}
-                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-bold"
+                        className="rounded-full border border-[#cfe0ec] bg-[#f3f8fc] px-3 py-1.5 text-[11px] font-bold"
                       >
                         {s}
                       </button>
@@ -1403,7 +1440,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                   </div>
                 )}
                 {chat.length > 0 && chat[chat.length - 1].mode === "basic" && (
-                  <p className="mt-3 text-[9.5px] leading-4 text-white/35">
+                  <p className="mt-3 text-[9.5px] leading-4 text-[#7a8fa0]">
                     Crave is answering without an AI model. Add an ANTHROPIC_API_KEY to the server for open-ended answers.
                   </p>
                 )}
@@ -1419,7 +1456,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     onClick={() => void sendChat()}
                     disabled={chatBusy || !chatInput.trim()}
                     aria-label="Send"
-                    className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-[#2de3a1] text-[#062a1c] disabled:opacity-40"
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] text-[#062a1c] disabled:opacity-40"
                   >
                     <Icon name="send" size={19} />
                   </button>
@@ -1540,6 +1577,9 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                 >
                   {posting ? "Uploading…" : "Post video"}
                 </button>
+                <p className="mt-3 rounded-lg bg-[#e9fbf4] px-3 py-2 text-center text-[10.5px] font-bold text-[#0a7a67]">
+                  Earn 10 credits every time someone orders from your video. 50 credits = free delivery.
+                </p>
                 <p className="mt-3 text-center text-[10px] leading-4 text-[#7a8fa0]">
                   Everyone using this app will be able to see your video. Only upload videos you filmed or have permission to share.
                 </p>
@@ -1548,21 +1588,21 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
 
             {panel === "search" && (
               <div>
-                <div className="flex items-center gap-2 rounded-xl bg-white/10 px-3">
+                <div className="flex items-center gap-2 rounded-xl bg-[#eaf2f8] px-3">
                   <Icon name="search" size={18} />
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && submitQuery()}
                     placeholder="Search dishes, restaurants, cravings"
-                    className="h-11 min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-white/35"
+                    className="h-11 min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-[#8aa0b2]"
                   />
                 </div>
                 <div className="mt-3 flex gap-2">
-                  <button onClick={submitQuery} className="h-10 flex-1 rounded-lg bg-[#2de3a1] text-[12px] font-bold text-[#062a1c]">
+                  <button onClick={submitQuery} className="h-10 flex-1 rounded-lg bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] text-[12px] font-bold text-[#062a1c]">
                     Search
                   </button>
-                  <button onClick={askFromSearch} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-white/10 text-[12px] font-bold">
+                  <button onClick={askFromSearch} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#eaf2f8] text-[12px] font-bold">
                     <Icon name="spark" size={15} /> Ask Crave
                   </button>
                 </div>
@@ -1573,7 +1613,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                       <button
                         key={c.label}
                         onClick={() => showResults(c.label, c.test)}
-                        className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11.5px] font-bold"
+                        className="rounded-full border border-[#cfe0ec] bg-[#f3f8fc] px-3 py-1.5 text-[11.5px] font-bold"
                       >
                         {c.label}
                       </button>
@@ -1584,37 +1624,37 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                 {results && (
                   <div className="mt-4">
                     <div className="mb-2 flex items-center justify-between">
-                      <p className="text-[10.5px] font-bold uppercase tracking-widest text-white/40">
+                      <p className="text-[10.5px] font-bold uppercase tracking-widest text-[#7a8fa0]">
                         {results.dishes.length} for “{results.label}”
                       </p>
-                      <button onClick={() => setResults(null)} className="text-[10.5px] font-bold text-[#2de3a1]">
+                      <button onClick={() => setResults(null)} className="text-[10.5px] font-bold text-[#0a8fb8]">
                         Clear
                       </button>
                     </div>
                     {results.dishes.length === 0 ? (
-                      <p className="rounded-xl bg-white/5 p-4 text-[12px] text-white/60">
+                      <p className="rounded-xl bg-[#f3f8fc] p-4 text-[12px] text-[#5b7083]">
                         Nothing in the feed matches that yet. Try Ask Crave — it can search Careem&apos;s live menus too.
                       </p>
                     ) : (
                       <div className="space-y-2">
                         {results.dishes.map((d) => (
-                          <div key={d.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-2">
+                          <div key={d.id} className="flex items-center gap-3 rounded-xl bg-[#f3f8fc] p-2">
                             <button onClick={() => jumpTo(d)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                               {d.imageUrl ? (
                                 <img src={d.imageUrl} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
                               ) : (
-                                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-white/10 text-[17px]">{emojiOf(d)}</span>
+                                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-[#eaf2f8] text-[17px]">{emojiOf(d)}</span>
                               )}
                               <span className="min-w-0">
                                 <strong className="block truncate text-[12px]">{d.name}</strong>
-                                <small className="block truncate text-white/50">
-                                  {d.restaurant} · AED {d.price}
+                                <small className="block truncate text-[#7a8fa0]">
+                                  {d.restaurant} · {priceText(d)}
                                 </small>
                               </span>
                             </button>
                             <button
                               onClick={() => jumpTo(d)}
-                              className="shrink-0 rounded-lg bg-white/10 px-3 py-2 text-[10.5px] font-bold"
+                              className="shrink-0 rounded-lg bg-[#eaf2f8] px-3 py-2 text-[10.5px] font-bold"
                             >
                               Watch
                             </button>
@@ -1625,13 +1665,13 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                   </div>
                 )}
 
-                <button onClick={() => setPanel("camera")} className="mt-5 flex w-full items-center gap-3 rounded-xl bg-white/5 p-3 text-left">
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-white/10">
+                <button onClick={() => setPanel("camera")} className="mt-5 flex w-full items-center gap-3 rounded-xl bg-[#f3f8fc] p-3 text-left">
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-[#eaf2f8]">
                     <Icon name="camera" size={18} />
                   </span>
                   <span>
                     <strong className="block text-[12px]">Search by photo</strong>
-                    <small className="text-white/45">Upload a food screenshot</small>
+                    <small className="text-[#7a8fa0]">Upload a food screenshot</small>
                   </span>
                 </button>
                 {hidden.size > 0 && (
@@ -1643,7 +1683,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                       close();
                       flash("Hidden dishes are back");
                     }}
-                    className="mt-3 w-full rounded-xl bg-white/5 py-3 text-[12px] font-bold text-white/70"
+                    className="mt-3 w-full rounded-xl bg-[#f3f8fc] py-3 text-[12px] font-bold text-[#5b7083]"
                   >
                     Show {hidden.size} hidden dish{hidden.size === 1 ? "" : "es"} again
                   </button>
@@ -1656,23 +1696,23 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                 {upload ? (
                   <div className="space-y-4">
                     <img src={upload} alt="Uploaded food" className="h-48 w-full rounded-2xl object-cover" />
-                    <div className="rounded-2xl bg-[#173027] p-4">
-                      <p className="text-[10.5px] font-bold text-[#2de3a1]">VISUAL MATCH · PROTOTYPE</p>
+                    <div className="rounded-2xl bg-gradient-to-br from-[#e9fbf4] to-[#e6f4fc] p-4">
+                      <p className="text-[10.5px] font-bold text-[#0a8fb8]">VISUAL MATCH · PROTOTYPE</p>
                       <p className="mt-1 text-[15px] font-bold">Oshi Pressed Sushi</p>
-                      <p className="text-[12px] text-white/55">Image matching is a mock-up: it always shows this dish.</p>
+                      <p className="text-[12px] text-[#5b7083]">Image matching is a mock-up: it always shows this dish.</p>
                     </div>
                     <button
                       onClick={() => {
                         const target = catalog.find((d) => d.id === "sushi");
                         if (target) jumpTo(target);
                       }}
-                      className="w-full rounded-xl bg-[#2de3a1] py-3 font-bold text-[#062a1c]"
+                      className="w-full rounded-xl bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] py-3 font-bold text-[#062a1c]"
                     >
                       Show it in the feed
                     </button>
                   </div>
                 ) : (
-                  <label className="grid h-52 cursor-pointer place-items-center rounded-2xl border border-dashed border-white/25 bg-white/5 text-center">
+                  <label className="grid h-52 cursor-pointer place-items-center rounded-2xl border border-dashed border-[#b4d2e6] bg-[#f3f8fc] text-center">
                     <input
                       type="file"
                       accept="image/*"
@@ -1683,11 +1723,11 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                       }}
                     />
                     <span>
-                      <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-[#2de3a1] text-[#062a1c]">
+                      <span className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] text-[#062a1c]">
                         <Icon name="camera" />
                       </span>
                       <strong>Upload a food screenshot</strong>
-                      <small className="mt-1 block text-white/45">We&apos;ll find similar dishes nearby</small>
+                      <small className="mt-1 block text-[#7a8fa0]">We&apos;ll find similar dishes nearby</small>
                     </span>
                   </label>
                 )}
@@ -1721,7 +1761,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                   {(friendActivity[friendsFor.id] ?? []).map((a) => (
                     <div key={a.name} className="flex items-center gap-3 rounded-xl bg-[#f3f8fc] p-3">
                       <span
-                        className="grid h-10 w-10 place-items-center rounded-full text-[12px] font-bold text-white"
+                        className="grid h-10 w-10 place-items-center rounded-full text-[12px] font-bold text-[#fff]"
                         style={{ background: friendColor[a.name] ?? `hsl(${hueOf(a.name)} 50% 45%)` }}
                       >
                         {a.name[0]}
@@ -1746,22 +1786,22 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
 
             {panel === "reviews" && reviewFor && (
               <div>
-                <div className="mb-4 flex items-center gap-3 rounded-2xl bg-white/5 p-3">
+                <div className="mb-4 flex items-center gap-3 rounded-2xl bg-[#f3f8fc] p-3">
                   {reviewFor.imageUrl && <img src={reviewFor.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />}
                   <div className="min-w-0">
                     <p className="truncate font-bold">{reviewFor.name}</p>
-                    <p className="text-[10.5px] text-white/55">{reviewFor.restaurant}</p>
+                    <p className="text-[10.5px] text-[#5b7083]">{reviewFor.restaurant}</p>
                   </div>
                 </div>
 
-                <div className="mb-4 rounded-2xl bg-white/5 p-3">
+                <div className="mb-4 rounded-2xl bg-[#f3f8fc] p-3">
                   <div className="mb-2 flex items-center gap-1">
                     {[1, 2, 3, 4, 5].map((n) => (
                       <button
                         key={n}
                         aria-label={`${n} star${n === 1 ? "" : "s"}`}
                         onClick={() => setDraftRating(n)}
-                        className={`text-[20px] leading-none ${n <= draftRating ? "text-[#ffd25e]" : "text-white/20"}`}
+                        className={`text-[20px] leading-none ${n <= draftRating ? "text-[#f5b301]" : "text-[#cfdbe5]"}`}
                       >
                         ★
                       </button>
@@ -1778,7 +1818,7 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     <button
                       onClick={postReview}
                       disabled={!draft.trim()}
-                      className="rounded-lg bg-[#2de3a1] px-4 text-[12px] font-bold text-[#062a1c] disabled:opacity-40"
+                      className="rounded-lg bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] px-4 text-[12px] font-bold text-[#062a1c] disabled:opacity-40"
                     >
                       Post
                     </button>
@@ -1786,26 +1826,26 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                 </div>
 
                 <div className="space-y-3">
-                  {reviewList(reviewFor).length === 0 && <p className="py-4 text-center text-[12px] text-white/50">No reviews yet — be the first.</p>}
+                  {reviewList(reviewFor).length === 0 && <p className="py-4 text-center text-[12px] text-[#7a8fa0]">No reviews yet — be the first.</p>}
                   {reviewList(reviewFor).map((r, i) => (
                     <div key={`${r.name}-${i}`} className="flex gap-3">
                       <span
-                        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[12px] font-bold"
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[12px] font-bold text-[#fff]"
                         style={{ background: `hsl(${hueOf(r.name)} 50% 34%)` }}
                       >
                         {r.name[0]}
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="text-[12px] font-bold">
-                          {r.name} <span className="font-normal text-white/40">· {r.when}</span>
+                          {r.name} <span className="font-normal text-[#7a8fa0]">· {r.when}</span>
                         </p>
-                        <p className="text-[9.5px] text-[#ffd25e]">{stars(r.rating)}</p>
-                        <p className="mt-0.5 text-[12px] leading-5 text-white/80">{r.text}</p>
+                        <p className="text-[9.5px] text-[#f5b301]">{stars(r.rating)}</p>
+                        <p className="mt-0.5 text-[12px] leading-5 text-[#2a4255]">{r.text}</p>
                       </div>
                     </div>
                   ))}
                 </div>
-                <p className="mt-5 text-center text-[9.5px] text-white/35">
+                <p className="mt-5 text-center text-[9.5px] text-[#7a8fa0]">
                   Sample reviews for this prototype. Reviews you post are saved on this device only.
                 </p>
               </div>
@@ -1815,27 +1855,27 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
               <div>
                 {bagTabs}
                 {savedDishes.length === 0 ? (
-                  <p className="py-8 text-center text-[12px] text-white/55">Tap the bookmark on a dish to save it for a later craving.</p>
+                  <p className="py-8 text-center text-[12px] text-[#5b7083]">Tap the bookmark on a dish to save it for a later craving.</p>
                 ) : (
                   <div className="space-y-2">
                     {savedDishes.map((d) => (
-                      <div key={d.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-2">
+                      <div key={d.id} className="flex items-center gap-3 rounded-xl bg-[#f3f8fc] p-2">
                         <button onClick={() => jumpTo(d)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                           {d.imageUrl ? (
                             <img src={d.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />
                           ) : (
-                            <span className="grid h-12 w-12 place-items-center rounded-lg bg-white/10 text-[17px]">{emojiOf(d)}</span>
+                            <span className="grid h-12 w-12 place-items-center rounded-lg bg-[#eaf2f8] text-[17px]">{emojiOf(d)}</span>
                           )}
                           <span className="min-w-0">
                             <strong className="block truncate text-[12px]">{d.name}</strong>
-                            <small className="text-white/50">
-                              {d.restaurant} · AED {d.price}
+                            <small className="text-[#7a8fa0]">
+                              {d.restaurant} · {priceText(d)}
                             </small>
                           </span>
                         </button>
                         <button
                           onClick={() => toggleBag(d)}
-                          className="rounded-lg bg-[#2de3a1] px-3 py-2 text-[10.5px] font-bold text-[#062a1c]"
+                          className="rounded-lg bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] px-3 py-2 text-[10.5px] font-bold text-[#062a1c]"
                         >
                           {basket.some((x) => x.id === d.id) ? "Remove" : "Add"}
                         </button>
@@ -1846,29 +1886,104 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
               </div>
             )}
 
+            {panel === "credits" && (
+              <div>
+                {bagTabs}
+                {(() => {
+                  const per = credits?.perVoucher ?? 50;
+                  const perOrder = credits?.perOrder ?? 10;
+                  const balance = credits?.balance ?? 0;
+                  const vouchers = credits?.vouchers ?? 0;
+                  return (
+                    <>
+                      <div className="rounded-2xl bg-gradient-to-br from-[#e9fbf4] to-[#e6f4fc] p-4">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#5b7083]">Your credits</p>
+                        <p className="mt-1 text-[28px] font-bold leading-none">{balance}</p>
+                        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0]"
+                            style={{ width: `${Math.min(100, ((balance % per) / per) * 100)}%` }}
+                          />
+                        </div>
+                        <p className="mt-2 text-[11px] text-[#5b7083]">
+                          {vouchers > 0
+                            ? `${vouchers} free deliver${vouchers === 1 ? "y" : "ies"} ready to use`
+                            : `${per - (balance % per)} more credits for a free delivery`}
+                        </p>
+                      </div>
+                      {vouchers > 0 && (
+                        <button
+                          onClick={() => {
+                            setUseFreeDelivery((v) => !v);
+                            flash(useFreeDelivery ? "Free delivery removed" : "Free delivery applied to your next order");
+                          }}
+                          className="mt-3 w-full rounded-xl bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] py-3 text-[13px] font-bold text-[#062a1c]"
+                        >
+                          {useFreeDelivery ? "Free delivery applied ✓ (tap to undo)" : "Use free delivery on my next order"}
+                        </button>
+                      )}
+                      <p className="mt-4 text-[11px] leading-[1.5] text-[#5b7083]">
+                        Earn <b>{perOrder} credits</b> every time someone orders from a video you shared. <b>{per} credits</b> buy a free
+                        delivery. Orders you place yourself don&apos;t count.
+                      </p>
+                      <p className="mb-2 mt-4 text-[10px] font-bold uppercase tracking-wider text-[#7a8fa0]">Your videos</p>
+                      {credits && credits.uploads.length > 0 ? (
+                        <div className="space-y-2">
+                          {credits.uploads.map((u) => (
+                            <div key={u.id} className="flex items-center gap-3 rounded-xl bg-[#f3f8fc] p-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[12px] font-bold">{u.dish}</p>
+                                <p className="truncate text-[10.5px] text-[#5b7083]">{u.restaurant}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[12px] font-bold text-[#0a8fb8]">{u.credits} credits</p>
+                                <p className="text-[10.5px] text-[#7a8fa0]">
+                                  {u.orders} order{u.orders === 1 ? "" : "s"}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-xl bg-[#f3f8fc] p-4 text-center">
+                          <p className="text-[12px] text-[#5b7083]">You haven&apos;t shared a video yet.</p>
+                          <button
+                            onClick={() => openPanel("upload")}
+                            className="mt-3 rounded-lg bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] px-4 py-2 text-[12px] font-bold text-[#062a1c]"
+                          >
+                            Share a dish video
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
             {panel === "basket" && (
               <div>
                 {bagTabs}
                 {basket.length === 0 ? (
-                  <p className="py-8 text-center text-[12px] text-white/55">Add a dish that makes you stop scrolling.</p>
+                  <p className="py-8 text-center text-[12px] text-[#5b7083]">Add a dish that makes you stop scrolling.</p>
                 ) : (
                   <div className="space-y-2">
                     {basket.map((item) => (
-                      <div key={item.id} className="flex items-center gap-3 rounded-xl bg-white/5 p-2">
+                      <div key={item.id} className="flex items-center gap-3 rounded-xl bg-[#f3f8fc] p-2">
                         {item.imageUrl ? (
                           <img src={item.imageUrl} alt="" className="h-11 w-11 rounded-lg object-cover" />
                         ) : (
-                          <span className="grid h-11 w-11 place-items-center rounded-lg bg-white/10 text-[17px]">{emojiOf(item)}</span>
+                          <span className="grid h-11 w-11 place-items-center rounded-lg bg-[#eaf2f8] text-[17px]">{emojiOf(item)}</span>
                         )}
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-[12px] font-bold">{item.name}</p>
-                          <p className="text-[10.5px] text-white/50">{item.restaurant}</p>
+                          <p className="text-[10.5px] text-[#7a8fa0]">{item.restaurant}</p>
                         </div>
-                        <span className="text-[12px] font-bold">AED {item.price}</span>
+                        <span className="text-[12px] font-bold">{item.priceKnown === false ? "At checkout" : `AED ${item.price}`}</span>
                         <button
                           aria-label={`Remove ${item.name}`}
                           onClick={() => removeFromBag(item)}
-                          className="grid h-8 w-8 place-items-center rounded-full bg-white/10"
+                          className="grid h-8 w-8 place-items-center rounded-full bg-[#eaf2f8]"
                         >
                           <Icon name="close" size={14} />
                         </button>
@@ -1876,20 +1991,41 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     ))}
                   </div>
                 )}
-                <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4">
+                {basket.length > 0 && (
+                  <div className="mt-4 flex items-center justify-between rounded-xl bg-[#f3f8fc] px-3 py-2.5 text-[11.5px]">
+                    <span className="font-bold">Delivery</span>
+                    {useFreeDelivery ? (
+                      <button onClick={() => setUseFreeDelivery(false)} className="font-bold text-[#0a8fb8]">
+                        Free · credits applied (undo)
+                      </button>
+                    ) : (credits?.vouchers ?? 0) > 0 ? (
+                      <button onClick={() => setUseFreeDelivery(true)} className="font-bold text-[#0a8fb8]">
+                        Use free delivery ({credits?.vouchers} ready)
+                      </button>
+                    ) : (
+                      <span className="text-[#5b7083]">Fee shown at checkout</span>
+                    )}
+                  </div>
+                )}
+                {basket.some((d) => d.priceKnown === false) && (
+                  <p className="mt-2 text-[10.5px] text-[#7a8fa0]">
+                    {basket.filter((d) => d.priceKnown === false).length} item(s) are priced at checkout and aren&apos;t in the subtotal.
+                  </p>
+                )}
+                <div className="mt-5 flex items-center justify-between border-t border-[#e1ebf3] pt-4">
                   <div>
-                    <p className="text-[10.5px] text-white/45">Subtotal</p>
+                    <p className="text-[10.5px] text-[#7a8fa0]">Subtotal</p>
                     <p className="text-[20px] font-bold">AED {total}</p>
                   </div>
                   <button
                     disabled={!basket.length}
                     onClick={() => setSplit(true)}
-                    className="rounded-xl bg-[#2de3a1] px-5 py-3 font-bold text-[#062a1c] disabled:opacity-30"
+                    className="rounded-xl bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] px-5 py-3 font-bold text-[#062a1c] disabled:opacity-30"
                   >
                     <Icon name="card" size={18} /> <span className="ml-1">Split & checkout</span>
                   </button>
                 </div>
-                {split && <SplitVote basket={basket} total={total} onComplete={() => flash("Payment links sent")} />}
+                {split && <SplitVote basket={basket} total={total} onComplete={() => void placeOrder()} />}
               </div>
             )}
           </Sheet>

@@ -6,6 +6,8 @@ export type Dish = {
   restaurant: string;
   cuisine: Cuisine;
   price: number;
+  /* false when the price isn't known yet: the UI says "Price at checkout" instead of showing AED 0 */
+  priceKnown?: boolean;
   /* Not every source has these, so they are optional and the UI hides them when missing. */
   rating?: number;
   reviews?: string;

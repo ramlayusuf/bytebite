@@ -60,8 +60,10 @@ export function applyTasteSignal(profile: TasteProfile, dish: Dish, signal: Tast
     next.cuisineAffinity[dish.cuisine] = clamp(affinity - 2, -8, 12);
   } else if (signal === "basket") {
     next.basketAdds = uniqueAdd(next.basketAdds, dish.id);
-    next.priceSamples = [...next.priceSamples.slice(-7), dish.price];
-    next.spendByCuisine[dish.cuisine] = [...(next.spendByCuisine[dish.cuisine] ?? []).slice(-5), dish.price];
+    if (dish.priceKnown !== false) {
+      next.priceSamples = [...next.priceSamples.slice(-7), dish.price];
+      next.spendByCuisine[dish.cuisine] = [...(next.spendByCuisine[dish.cuisine] ?? []).slice(-5), dish.price];
+    }
     next.cuisineAffinity[dish.cuisine] = clamp(affinity + 4, -8, 12);
   } else if (signal === "dwell") {
     next.dwellMs[dish.id] = Math.min(30_000, (next.dwellMs[dish.id] ?? 0) + value);
@@ -77,7 +79,7 @@ export function tasteScore(dish: Dish, profile: TasteProfile) {
   const averagePrice = samples.length
     ? samples.reduce((sum, price) => sum + price, 0) / samples.length
     : 48;
-  const priceFit = clamp(8 - Math.abs(dish.price - averagePrice) / 4, 0, 8);
+  const priceFit = dish.priceKnown === false ? 4 : clamp(8 - Math.abs(dish.price - averagePrice) / 4, 0, 8);
   const dwell = profile.dwellMs[dish.id] ?? 0;
   const dwellSignal = dwell >= 10_000 ? 7 : dwell >= 5_000 ? 5 : dwell >= 2_500 ? 2 : 0;
   const explicit = (profile.liked.includes(dish.id) ? 12 : 0)

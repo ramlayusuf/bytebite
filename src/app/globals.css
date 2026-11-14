@@ -29,11 +29,12 @@ button { cursor: pointer; }
 .clean .burst { animation: burst .85s ease-out forwards; }
 .phone-screen input, .phone-screen textarea { -webkit-user-select: text; user-select: text; }
 
-/* TikTok video: fits the screen width and sits right on the progress line; the top 9% of the frame (TikTok's own name + logo) is cropped off */
+/* TikTok video: covers the whole screen above the progress line; the top 9% of the frame (TikTok's own name + logo) is cropped off */
 .cqbox { container-type: size; }
-.tt-cover { position: absolute; left: 0; bottom: var(--nav-h); width: 100%; height: calc(100cqw * 16 / 9 * .91); overflow: hidden; background: #000; transition: bottom .25s ease; }
-.tt-frame { position: absolute; left: 0; bottom: 0; width: 100%; height: calc(100cqw * 16 / 9); }
+.tt-cover { position: absolute; top: 0; left: 0; right: 0; bottom: var(--nav-h); overflow: hidden; background: #000; transition: bottom .25s ease; }
+.tt-frame { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); aspect-ratio: 9 / 16; height: max(calc(100cqw * 16 / 9), calc((100cqh - var(--nav-h)) / .91)); }
 .clean .tt-cover { bottom: 0; }
+.clean .tt-frame { height: max(calc(100cqw * 16 / 9), calc(100cqh / .91)); }
 
 /* a little personality */
 .ring { background: conic-gradient(from 0deg, #2de3a1, #ffe27a, #2de3a1); }

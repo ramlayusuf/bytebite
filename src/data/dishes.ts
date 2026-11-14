@@ -6,6 +6,8 @@ import type { Dish } from "@/types/dish";
  * Where a price appears in the video's caption it is used as-is; the two marked "carried over" are
  * placeholders from the earlier prototype and are not from the video.
  * Dishes added later have no stock photo (imageUrl) on purpose: a generic picture would be wrong.
+ * The last seven (priceKnown: false) were added from links only: their dish names and prices are not
+ * known yet, so the UI says "Price at checkout" rather than inventing numbers.
  * Ratings, review counts and delivery times are deliberately NOT set — no verified source for them.
  */
 export const dishes: Dish[] = [
@@ -127,5 +129,54 @@ export const dishes: Dish[] = [
     tags: ["Indonesian"], ingredients: ["Chicken satay", "Peanut sauce"], gridPosition: "0% 0%", match: 78,
     tiktokId: "7368800642241973525", creatorHandle: "feedkiani",
     reviewUrl: "https://www.tiktok.com/@feedkiani/video/7368800642241973525", reviewCreator: "feedkiani", reviewPlatform: "TikTok",
+  },
+  {
+    id: "papajohns", name: "Featured on Papa Johns UAE", restaurant: "Papa Johns UAE", cuisine: "Italian", price: 0, priceKnown: false,
+    description: "Posted by the restaurant on TikTok. Watch the video, then add it to your bag. The dish and its price are confirmed at checkout.",
+    tags: ["From the restaurant"], gridPosition: "0% 0%", match: 76,
+    tiktokId: "7638294839993355528", creatorHandle: "papajohnsuae", restaurantHandle: "papajohnsuae",
+    reviewUrl: "https://www.tiktok.com/@papajohnsuae/video/7638294839993355528", reviewCreator: "papajohnsuae", reviewPlatform: "TikTok",
+  },
+  {
+    id: "amroeats", name: "Featured in Amro Eats' video", restaurant: "Restaurant in the video", cuisine: "Other", price: 0, priceKnown: false,
+    description: "Watch the video, then add it to your bag. The dish and its price are confirmed at checkout.",
+    tags: ["Creator pick"], gridPosition: "0% 0%", match: 76,
+    tiktokId: "7625708081934093588", creatorHandle: "amroeats",
+    reviewUrl: "https://www.tiktok.com/@amroeats/video/7625708081934093588", reviewCreator: "amroeats", reviewPlatform: "TikTok",
+  },
+  {
+    id: "hardees", name: "Featured on Hardee's UAE", restaurant: "Hardee's UAE", cuisine: "Burgers", price: 0, priceKnown: false,
+    description: "Posted by the restaurant on TikTok. Watch the video, then add it to your bag. The dish and its price are confirmed at checkout.",
+    tags: ["From the restaurant"], gridPosition: "0% 0%", match: 76,
+    tiktokId: "7678845319278333205", creatorHandle: "hardees.uae", restaurantHandle: "hardees.uae",
+    reviewUrl: "https://www.tiktok.com/@hardees.uae/video/7678845319278333205", reviewCreator: "hardees.uae", reviewPlatform: "TikTok",
+  },
+  {
+    id: "bweebites", name: "Featured in bweebites' video", restaurant: "Restaurant in the video", cuisine: "Other", price: 0, priceKnown: false,
+    description: "Watch the video, then add it to your bag. The dish and its price are confirmed at checkout.",
+    tags: ["Creator pick"], gridPosition: "0% 0%", match: 76,
+    tiktokId: "7621119789188107541", creatorHandle: "bweebites",
+    reviewUrl: "https://www.tiktok.com/@bweebites/video/7621119789188107541", reviewCreator: "bweebites", reviewPlatform: "TikTok",
+  },
+  {
+    id: "hungrydentist", name: "Featured in The Hungry Dentist's video", restaurant: "Restaurant in the video", cuisine: "Other", price: 0, priceKnown: false,
+    description: "Watch the video, then add it to your bag. The dish and its price are confirmed at checkout.",
+    tags: ["Creator pick"], gridPosition: "0% 0%", match: 76,
+    tiktokId: "7700236442835995924", creatorHandle: "thehungrydentist",
+    reviewUrl: "https://www.tiktok.com/@thehungrydentist/video/7700236442835995924", reviewCreator: "thehungrydentist", reviewPlatform: "TikTok",
+  },
+  {
+    id: "laffah", name: "Featured on Laffah", restaurant: "Laffah", cuisine: "Arabic", price: 0, priceKnown: false,
+    description: "Posted by the restaurant on TikTok. Watch the video, then add it to your bag. The dish and its price are confirmed at checkout.",
+    tags: ["From the restaurant"], gridPosition: "0% 0%", match: 76,
+    tiktokId: "7575551939967028501", creatorHandle: "laffahrestuae", restaurantHandle: "laffahrestuae",
+    reviewUrl: "https://www.tiktok.com/@laffahrestuae/video/7575551939967028501", reviewCreator: "laffahrestuae", reviewPlatform: "TikTok",
+  },
+  {
+    id: "pizzaro", name: "Featured on Pizzaro", restaurant: "Pizzaro", cuisine: "Italian", price: 0, priceKnown: false,
+    description: "Posted by the restaurant on TikTok. Watch the video, then add it to your bag. The dish and its price are confirmed at checkout.",
+    tags: ["From the restaurant"], gridPosition: "0% 0%", match: 76,
+    tiktokId: "7521727990955314450", creatorHandle: "pizzaro.me", restaurantHandle: "pizzaro.me",
+    reviewUrl: "https://www.tiktok.com/@pizzaro.me/video/7521727990955314450", reviewCreator: "pizzaro.me", reviewPlatform: "TikTok",
   },
 ];

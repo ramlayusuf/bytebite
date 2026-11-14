@@ -79,6 +79,7 @@ export async function POST(request: Request) {
         description: clean(form.get("description"), 400),
         ingredients,
         uploaderName: clean(form.get("uploaderName"), 40) || undefined,
+        ownerClient: /^[A-Za-z0-9_-]{1,64}$/.test(clean(form.get("clientId"), 64)) ? clean(form.get("clientId"), 64) : undefined,
       },
       video,
       posterFile,

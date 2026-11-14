@@ -30,6 +30,8 @@ export type UploadRecord = {
   /* every dish shown in the video (the first is also `dish` / `price`) */
   items?: { name: string; price: number }[];
   uploaderName?: string;
+  /* the browser that uploaded it, so its own orders don't earn it credits */
+  ownerClient?: string;
   createdAt: number;
   deleteToken: string;
 };

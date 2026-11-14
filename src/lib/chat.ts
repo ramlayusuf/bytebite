@@ -60,7 +60,7 @@ async function catalog(): Promise<CatalogDish[]> {
       description: u.description,
       ingredients: u.ingredients,
     })),
-    ...dishes.map((d) => ({
+    ...dishes.filter((d) => d.priceKnown !== false).map((d) => ({
       id: d.id,
       name: d.name,
       restaurant: d.restaurant,

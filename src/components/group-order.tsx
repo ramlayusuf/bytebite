@@ -52,23 +52,23 @@ export function TogetherPanel({
     return (
       <div>
         <div className="mb-4 flex -space-x-2">
-          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-[#5844d8] font-bold">
+          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-white bg-[#5844d8] font-bold text-[#fff]">
             R
           </span>
-          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-[#ef755b] font-bold">
+          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-white bg-[#ef755b] font-bold text-[#fff]">
             M
           </span>
-          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-[#102019] bg-white/10 text-white/40">
+          <span className="grid h-12 w-12 place-items-center rounded-full border-2 border-white bg-[#eaf2f8] text-[#7a8fa0]">
             +3
           </span>
         </div>
-        <p className="mb-5 text-[12px] leading-6 text-white/60">
+        <p className="mb-5 text-[12px] leading-6 text-[#5b7083]">
           Everyone swipes privately. A match happens when the group chooses
           dishes from the same restaurant.
         </p>
         <button
           onClick={() => setRoom(true)}
-          className="w-full rounded-xl bg-[#2de3a1] py-3 font-bold text-[#07110d]"
+          className="w-full rounded-xl bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] py-3 font-bold text-[#07110d]"
         >
           Create room · BYTE42
         </button>
@@ -79,11 +79,11 @@ export function TogetherPanel({
     return (
       <div>
         <div className="text-center">
-          <p className="text-[10.5px] font-bold text-[#2de3a1]">RESTAURANT MATCH</p>
+          <p className="text-[10.5px] font-bold text-[#0a8fb8]">RESTAURANT MATCH</p>
           <h3 className="mt-1 text-[20px] font-bold">
             Everyone chose Eleven Green
           </h3>
-          <p className="mt-2 text-[12px] text-white/55">
+          <p className="mt-2 text-[12px] text-[#5b7083]">
             One restaurant, three dishes, one shared delivery.
           </p>
         </div>
@@ -91,7 +91,7 @@ export function TogetherPanel({
           {choices.map((dish, index) => (
             <div
               key={dish.id}
-              className="flex items-center gap-3 rounded-xl bg-white/5 p-2"
+              className="flex items-center gap-3 rounded-xl bg-[#f3f8fc] p-2"
             >
               <img
                 src={dish.imageUrl}
@@ -100,17 +100,17 @@ export function TogetherPanel({
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[12px] font-bold">{dish.name}</p>
-                <p className="text-[10.5px] text-white/45">
+                <p className="text-[10.5px] text-[#7a8fa0]">
                   {["You", "Reem", "Mohammed"][index]} · AED {dish.price}
                 </p>
               </div>
-              <span className="text-[#2de3a1]">✓</span>
+              <span className="text-[#0a8fb8]">✓</span>
             </div>
           ))}
         </div>
         <button
           onClick={() => onCreateCart(choices)}
-          className="mt-5 w-full rounded-xl bg-[#2de3a1] py-3 font-bold text-[#07110d]"
+          className="mt-5 w-full rounded-xl bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] py-3 font-bold text-[#07110d]"
         >
           Create shared cart · AED{" "}
           {choices.reduce((sum, dish) => sum + dish.price, 0)}
@@ -122,8 +122,8 @@ export function TogetherPanel({
   return (
     <div>
       <div className="mb-3 flex items-center justify-between text-[10.5px]">
-        <span className="font-bold text-[#2de3a1]">ROOM BYTE42</span>
-        <span className="text-white/45">
+        <span className="font-bold text-[#0a8fb8]">ROOM BYTE42</span>
+        <span className="text-[#7a8fa0]">
           {card + 1} of {choices.length}
         </span>
       </div>
@@ -143,7 +143,7 @@ export function TogetherPanel({
             ? undefined
             : { transform: `translateX(${dragX}px) rotate(${dragX / 18}deg)` }
         }
-        className={`relative touch-none cursor-grab overflow-hidden rounded-[24px] bg-white/5 transition duration-300 active:cursor-grabbing ${motion === "yes" ? "translate-x-full rotate-12 opacity-0" : motion === "no" ? "-translate-x-full -rotate-12 opacity-0" : ""}`}
+        className={`relative touch-none cursor-grab overflow-hidden rounded-[24px] bg-[#f3f8fc] transition duration-300 active:cursor-grabbing ${motion === "yes" ? "translate-x-full rotate-12 opacity-0" : motion === "no" ? "-translate-x-full -rotate-12 opacity-0" : ""}`}
       >
         <img
           src={dish.imageUrl}
@@ -152,15 +152,15 @@ export function TogetherPanel({
           draggable={false}
         />
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/75 to-transparent p-5 pt-20">
-          <p className="text-[10.5px] font-bold text-[#2de3a1]">{dish.restaurant}</p>
-          <h3 className="text-[20px] font-bold">{dish.name}</h3>
-          <p className="mt-1 text-[12px] text-white/65">
+          <p className="text-[10.5px] font-bold text-[#3ef0b0]">{dish.restaurant}</p>
+          <h3 className="text-[20px] font-bold text-[#fff]">{dish.name}</h3>
+          <p className="mt-1 text-[12px] text-[#fff]/65">
             AED {dish.price}
           </p>
         </div>
         {(motion || Math.abs(dragX) > 35) && (
           <span
-            className={`absolute top-5 rounded-lg border-4 px-3 py-1 text-[20px] font-bold ${motion === "yes" || (!motion && dragX > 0) ? "left-5 -rotate-12 border-[#2de3a1] text-[#2de3a1]" : "right-5 rotate-12 border-red-400 text-red-400"}`}
+            className={`absolute top-5 rounded-lg border-4 px-3 py-1 text-[20px] font-bold ${motion === "yes" || (!motion && dragX > 0) ? "left-5 -rotate-12 border-[#3ef0b0] text-[#3ef0b0]" : "right-5 rotate-12 border-red-400 text-red-400"}`}
           >
             {motion === "yes" || (!motion && dragX > 0) ? "YES" : "NOPE"}
           </span>
@@ -177,12 +177,12 @@ export function TogetherPanel({
         <button
           onClick={() => vote(true)}
           aria-label="Yes"
-          className="grid h-16 w-16 place-items-center rounded-full bg-[#2de3a1] text-[#07110d]"
+          className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-r from-[#2de3a1] to-[#4cc9f0] text-[#07110d]"
         >
           <Icon name="heart" filled size={28} />
         </button>
       </div>
-      <p className="mt-3 text-center text-[10.5px] text-white/40">
+      <p className="mt-3 text-center text-[10.5px] text-[#7a8fa0]">
         Swipe privately · friends cannot see your votes
       </p>
     </div>
@@ -227,13 +227,13 @@ export function SplitVote({
   };
 
   return (
-    <div className="pop mt-4 rounded-2xl bg-white p-4 text-[#07110d]">
+    <div className="pop mt-4 rounded-2xl border border-[#e1ebf3] bg-[#f6fafd] p-4 text-[#0b2230]">
       <p className="text-[10.5px] font-bold text-[#087f5b]">GROUP VOTE</p>
       <h3 className="mt-1 text-[15px] font-bold">How should we split it?</h3>
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button
           onClick={() => castVote("equal")}
-          className={`rounded-xl border p-3 text-left ${votes.You === "equal" ? "border-[#087f5b] bg-[#e6fff5]" : "border-black/10"}`}
+          className={`rounded-xl border p-3 text-left ${votes.You === "equal" ? "border-[#087f5b] bg-[#e9fbf4]" : "border-black/10"}`}
         >
           <strong className="block text-[12px]">Split equally</strong>
           <span className="text-[10.5px] text-black/50">
@@ -245,7 +245,7 @@ export function SplitVote({
         </button>
         <button
           onClick={() => castVote("dish")}
-          className={`rounded-xl border p-3 text-left ${votes.You === "dish" ? "border-[#087f5b] bg-[#e6fff5]" : "border-black/10"}`}
+          className={`rounded-xl border p-3 text-left ${votes.You === "dish" ? "border-[#087f5b] bg-[#e9fbf4]" : "border-black/10"}`}
         >
           <strong className="block text-[12px]">By chosen dish</strong>
           <span className="text-[10.5px] text-black/50">
@@ -286,7 +286,7 @@ export function SplitVote({
         ))}
       </div>
       {unanimous ? (
-        <div className="mt-4 rounded-xl bg-[#e6fff5] p-3 text-center">
+        <div className="mt-4 rounded-xl bg-[#e9fbf4] p-3 text-center">
           <p className="text-[10.5px] font-bold text-[#087f5b]">UNANIMOUS DECISION</p>
           <p className="text-[12px] font-bold">
             {unanimous === "equal"
@@ -302,7 +302,7 @@ export function SplitVote({
       <button
         disabled={!unanimous}
         onClick={onComplete}
-        className="mt-4 w-full rounded-xl bg-[#07110d] py-3 font-bold text-white disabled:opacity-25"
+        className="mt-4 w-full rounded-xl bg-[#0b2230] py-3 font-bold text-[#fff] disabled:opacity-30"
       >
         Confirm split & send payment links
       </button>
