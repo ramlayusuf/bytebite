@@ -189,13 +189,14 @@ function TogetherPanel({
   onCreateCart,
 }: {
   baseDish: Dish;
-  onCreateCart: (items: Dish[]) => void;
+  onCreateCart: (items: Dish[]) => Promise<void>;
 }) {
   const [room, setRoom] = useState(false);
   const [card, setCard] = useState(0);
   const [matched, setMatched] = useState(false);
   const [motion, setMotion] = useState<"yes" | "no" | null>(null);
   const [dragX, setDragX] = useState(0);
+  const [preparing, setPreparing] = useState(false);
   const dragStart = useRef<number | null>(null);
   const choices: Dish[] = [
     baseDish,
@@ -288,11 +289,18 @@ function TogetherPanel({
           ))}
         </div>
         <button
-          onClick={() => onCreateCart(choices)}
-          className="mt-5 w-full rounded-xl bg-[#2de3a1] py-3 font-black text-[#07110d]"
+          disabled={preparing}
+          onClick={async () => {
+            setPreparing(true);
+            try {
+              await onCreateCart(choices);
+            } finally {
+              setPreparing(false);
+            }
+          }}
+          className="mt-5 w-full rounded-xl bg-[#2de3a1] py-3 font-black text-[#07110d] disabled:opacity-50"
         >
-          Create shared cart · AED{" "}
-          {choices.reduce((sum, dish) => sum + dish.price, 0)}
+          {preparing ? "Checking the live Careem menu…" : "Prepare host basket"}
         </button>
       </div>
     );
@@ -369,6 +377,11 @@ function TogetherPanel({
 }
 
 type SplitChoice = "equal" | "dish";
+type GroupPlan = {
+  confirmationId: string;
+  selections: Record<string, string[]>;
+  restaurant: string;
+};
 
 function SplitVote({
   basket,
@@ -408,7 +421,10 @@ function SplitVote({
   return (
     <div className="pop mt-4 rounded-2xl bg-white p-4 text-[#07110d]">
       <p className="text-xs font-bold text-[#087f5b]">GROUP VOTE</p>
-      <h3 className="mt-1 text-lg font-black">How should we split it?</h3>
+      <h3 className="mt-1 text-lg font-black">How should we contribute?</h3>
+      <p className="mt-1 text-xs text-black/45">
+        ByteBite tracks contributions; Careem charges the host for the basket.
+      </p>
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button
           onClick={() => castVote("equal")}
@@ -475,7 +491,7 @@ function SplitVote({
         </div>
       ) : (
         <p className="mt-4 text-center text-xs text-black/45">
-          Payment unlocks when all three agree.
+          Host confirmation unlocks when all three agree.
         </p>
       )}
       <button
@@ -483,8 +499,248 @@ function SplitVote({
         onClick={onComplete}
         className="mt-4 w-full rounded-xl bg-[#07110d] py-3 font-black text-white disabled:opacity-25"
       >
-        Confirm split & send payment links
+        Add to host&apos;s Careem basket
       </button>
+    </div>
+  );
+}
+
+function CareemStatus() {
+  return (
+    <div className="flex items-center justify-between px-6 pt-4 text-sm font-black">
+      <span>12:25</span>
+      <span className="flex items-center gap-2 text-xs">
+        ▮▮▮ ◉ <b className="rounded bg-white/80 px-1 text-[#064c40]">42</b>
+      </span>
+    </div>
+  );
+}
+
+function CareemConnect() {
+  return (
+    <div className="flex h-full flex-col bg-[#005448] px-7 text-white">
+      <CareemStatus />
+      <div className="flex flex-1 flex-col items-center justify-center text-center">
+        <span className="grid h-20 w-20 place-items-center rounded-[24px] bg-[#2de3a1] text-5xl font-black text-[#073f36] shadow-xl">
+          C
+        </span>
+        <p className="mt-8 text-xs font-bold uppercase tracking-[.22em] text-[#7ff2c8]">
+          Careem × ByteBite
+        </p>
+        <h1 className="mt-3 text-4xl font-black leading-tight">
+          Connect your
+          <br />
+          Careem account
+        </h1>
+        <p className="mt-4 max-w-[280px] text-sm leading-6 text-white/65">
+          Discover real dishes, use your saved addresses and turn every craving
+          into a Careem basket.
+        </p>
+        <a
+          href="/api/careem/auth"
+          className="mt-8 w-full rounded-2xl bg-[#2de3a1] py-4 text-base font-black text-[#073f36] shadow-lg"
+        >
+          Connect to Careem
+        </a>
+        <p className="mt-4 text-[10px] leading-4 text-white/40">
+          Secure sign-in through Careem Identity.
+          <br />
+          ByteBite never sees your password.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CareemHome({ onFood }: { onFood: () => void }) {
+  const services = [
+    ["🚘", "Rides"],
+    ["🍔", "Food"],
+    ["🛒", "Quik"],
+    ["🪙", "Pay"],
+    ["🚕", "Hala Taxi"],
+    ["🛍️", "Shops"],
+    ["🛵", "Box"],
+    ["🧺", "Home&Care"],
+  ];
+  return (
+    <div className="h-full overflow-y-auto bg-[#f6f6f6] text-[#101514]">
+      <div className="rounded-b-[28px] bg-[#005448] pb-5 text-white">
+        <CareemStatus />
+        <div className="mx-4 mt-7 flex h-14 items-center justify-between rounded-2xl bg-[#e8eeee] px-4 text-lg text-black/70">
+          <span>Discover Careem</span>
+          <span className="text-3xl font-light">⌕</span>
+        </div>
+      </div>
+      <section className="-mt-1 rounded-t-[28px] bg-white px-4 pb-5 pt-5">
+        <div className="grid grid-cols-4 gap-2">
+          {services.map(([emoji, label], index) => (
+            <button
+              key={label}
+              onClick={index === 1 ? onFood : undefined}
+              className="relative flex aspect-[.82] flex-col items-center justify-center rounded-2xl bg-[#f1f2f3] text-center"
+            >
+              <span className="text-4xl drop-shadow-sm">{emoji}</span>
+              <strong className="mt-2 text-[11px]">{label}</strong>
+              {index === 1 && (
+                <i className="absolute -top-2 rounded bg-[#006b55] px-2 py-1 text-[8px] not-italic text-[#4bffc3]">
+                  FlashSale
+                </i>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2 text-[10px]">
+          <div className="rounded-xl border border-black/10 p-3">
+            <span className="text-black/55">Balance</span>
+            <b className="mt-1 block text-sm">AED 0.00</b>
+          </div>
+          <div className="rounded-xl border border-black/10 p-3">
+            <span className="text-black/55">Resend to</span>
+            <b className="mt-1 block text-sm">Sadia Hasan</b>
+          </div>
+          <div className="rounded-xl border border-black/10 p-3">
+            <span className="text-black/55">Add card</span>
+            <b className="mt-1 block text-sm">Set up</b>
+          </div>
+        </div>
+      </section>
+      <section className="bg-[#f4dfb9] px-5 py-6">
+        <p className="text-2xl font-black leading-tight text-[#005448]">
+          Freshness, at
+          <br />
+          your fingertips
+        </p>
+        <p className="mt-1 text-sm">Groceries delivered in 15 mins</p>
+        <div className="mt-5 flex gap-3 overflow-hidden">
+          {[
+            ["🍌", "Bananas Ecuador"],
+            ["🧅", "Onions Red India"],
+            ["🍅", "Tomatoes"],
+          ].map(([emoji, name]) => (
+            <div key={name} className="min-w-[126px] rounded-2xl bg-white p-3">
+              <div className="grid h-24 place-items-center rounded-xl bg-[#f6fae9] text-5xl">
+                {emoji}
+              </div>
+              <p className="mt-2 text-xs font-bold">{name}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+      <CareemBottom active="home" />
+    </div>
+  );
+}
+
+function CareemBottom({
+  active,
+  onCrave,
+}: {
+  active: "home" | "food";
+  onCrave?: () => void;
+}) {
+  const items = [
+    ["⌂", "Home"],
+    ["⌕", "Search"],
+    ["▤", "Orders"],
+    ["camera", "Crave"],
+    ["♙", "Profile"],
+  ].filter(([, label]) => active === "food" || label !== "Crave");
+  return (
+    <nav className="sticky bottom-0 z-30 flex h-[70px] items-start justify-around border-t border-black/5 bg-[#005448] px-1 pt-2 text-white">
+      {items.map(([icon, label]) => (
+        <button
+          key={label}
+          onClick={label === "Crave" ? onCrave : undefined}
+          className={`flex min-w-0 flex-col items-center gap-1 text-[9px] font-bold ${label.toLowerCase() === active ? "text-white" : "text-white/60"}`}
+        >
+          {icon === "camera" ? (
+            <Icon name="camera" size={21} />
+          ) : (
+            <span className="text-xl leading-5">{icon}</span>
+          )}
+          <span>{label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function CareemFood({ onCrave }: { onCrave: () => void }) {
+  const restaurants = [
+    ["/food/dishes/burger.jpg", "Eleven Green", "24 min"],
+    ["/food/dishes/shawarma.jpg", "Allo Beirut", "19 min"],
+    ["/food/dishes/sushi.jpg", "3Fils", "31 min"],
+  ];
+  return (
+    <div className="h-full overflow-y-auto bg-[#f6f6f6] text-[#101514]">
+      <div className="bg-[#005448] pb-5 text-white">
+        <CareemStatus />
+        <div className="px-5 pt-5">
+          <p className="text-[10px] text-white/65">Deliver to</p>
+          <p className="text-sm font-bold">Dubai Marina⌄</p>
+          <div className="mt-4 flex h-12 items-center rounded-xl bg-white px-4 text-sm text-black/45">
+            <span className="mr-2 text-xl">⌕</span>Search dishes or restaurants
+          </div>
+        </div>
+      </div>
+      <main className="px-4 pb-4">
+        <section className="mt-4 overflow-hidden rounded-2xl bg-[#d8f7e9] p-5">
+          <p className="text-[10px] font-bold uppercase text-[#087f5b]">
+            Only on Careem
+          </p>
+          <h2 className="mt-1 text-2xl font-black leading-tight">
+            Your next craving
+            <br />
+            is one tap away.
+          </h2>
+          <p className="mt-2 text-xs text-black/55">
+            Popular dishes near you, delivered fast.
+          </p>
+        </section>
+        <h3 className="mt-5 text-lg font-black">What are you craving?</h3>
+        <div className="mt-3 flex gap-3 overflow-hidden">
+          {[
+            ["🍔", "Burgers"],
+            ["🍣", "Sushi"],
+            ["🍕", "Pizza"],
+            ["🥙", "Arabic"],
+          ].map(([emoji, name]) => (
+            <div key={name} className="min-w-[72px] text-center">
+              <div className="grid h-16 place-items-center rounded-full bg-white text-3xl shadow-sm">
+                {emoji}
+              </div>
+              <p className="mt-1 text-[10px] font-bold">{name}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6 flex items-center justify-between">
+          <h3 className="text-lg font-black">Popular near you</h3>
+          <span className="text-xs font-bold text-[#087f5b]">See all</span>
+        </div>
+        <div className="mt-3 space-y-3">
+          {restaurants.map(([image, name, time]) => (
+            <div
+              key={name}
+              className="flex gap-3 rounded-2xl bg-white p-2 shadow-sm"
+            >
+              <img
+                src={image}
+                alt=""
+                className="h-20 w-24 rounded-xl object-cover"
+              />
+              <div className="py-1">
+                <p className="font-black">{name}</p>
+                <p className="mt-1 text-xs text-black/45">
+                  4.8 ★ · AED 5 delivery
+                </p>
+                <p className="mt-2 text-xs font-bold text-[#087f5b]">{time}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+      <CareemBottom active="food" onCrave={onCrave} />
     </div>
   );
 }
@@ -503,8 +759,21 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     [chatting, setChatting] = useState(false),
     [upload, setUpload] = useState(""),
     [roomReady, setRoomReady] = useState(false),
-    [split, setSplit] = useState(false);
+    [split, setSplit] = useState(false),
+    [groupPlan, setGroupPlan] = useState<GroupPlan | null>(null),
+    [committingGroup, setCommittingGroup] = useState(false);
   const [feedMode, setFeedMode] = useState<"following" | "for-you">("for-you");
+  const [appScreen, setAppScreen] = useState<
+    "connect" | "home" | "food" | "crave"
+  >("connect");
+  useEffect(() => {
+    if (appScreen !== "connect") return;
+    fetch("/api/careem/status", { cache: "no-store" })
+      .then((response) => {
+        if (response.ok) setAppScreen("home");
+      })
+      .catch(() => undefined);
+  }, [appScreen]);
   const feedRef = useRef<HTMLDivElement>(null),
     active = useRef(0),
     viewAt = useRef(0),
@@ -574,12 +843,72 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
       Math.min(active.current + 1, feed.length - 1)
     ]?.scrollIntoView({ behavior: "smooth" });
   };
-  const add = (dish: Dish) => {
-    if (!basket.some((x) => x.id === dish.id)) {
-      setBasket((x) => [...x, dish]);
-      learn(dish, "basket");
+  const add = async (dish: Dish) => {
+    try {
+      const location = await new Promise<{
+        latitude: number;
+        longitude: number;
+      }>((resolve) =>
+        navigator.geolocation.getCurrentPosition(
+          (position) =>
+            resolve({
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            }),
+          () => resolve({ latitude: 25.0866, longitude: 55.1474 }),
+          { enableHighAccuracy: true, timeout: 6000 },
+        ),
+      );
+      flash("Checking Careem availability…");
+      const preparedResponse = await fetch("/api/basket", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "prepare",
+          dishName: dish.name,
+          restaurantName: dish.restaurant,
+          ...location,
+        }),
+      });
+      const prepared = await preparedResponse.json();
+      if (!preparedResponse.ok) throw new Error(prepared.error);
+      const options: string[] = [];
+      for (const group of prepared.requiredOptions ?? []) {
+        const answer = window.prompt(
+          `${group.name}\n${group.options.map((option: { name: string; price: number }, index: number) => `${index + 1}. ${option.name}${option.price ? ` (+AED ${option.price})` : ""}`).join("\n")}\n\nEnter a number:`,
+        );
+        if (!answer) return flash("Nothing was added");
+        const selected = group.options[Number(answer) - 1];
+        if (!selected) throw new Error(`Invalid choice for ${group.name}`);
+        options.push(selected.id);
+      }
+      const confirmed = window.confirm(
+        `Add ${prepared.item.name} from ${prepared.item.restaurant} to your REAL Careem basket${prepared.item.price ? ` for AED ${prepared.item.price}` : ""}?`,
+      );
+      if (!confirmed) return flash("Nothing was added");
+      const committedResponse = await fetch("/api/basket", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "commit",
+          confirmationId: prepared.confirmationId,
+          options,
+        }),
+      });
+      const committed = await committedResponse.json();
+      if (!committedResponse.ok) throw new Error(committed.error);
+      if (!basket.some((item) => item.id === dish.id)) {
+        setBasket((items) => [...items, dish]);
+        learn(dish, "basket");
+      }
+      flash(`${committed.item.name} added to Careem`);
+    } catch (error) {
+      flash(
+        error instanceof Error
+          ? error.message
+          : "Could not update Careem basket",
+      );
     }
-    flash(`${dish.name} added`);
   };
   const selectFeed = (mode: "following" | "for-you") => {
     setFeedMode(mode);
@@ -593,6 +922,100 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     requestAnimationFrame(() =>
       feedRef.current?.scrollTo({ top: 0, behavior: "smooth" }),
     );
+  };
+  const prepareGroupBasket = async (mockItems: Dish[]) => {
+    const location = await new Promise<{
+      latitude: number;
+      longitude: number;
+    }>((resolve) =>
+      navigator.geolocation.getCurrentPosition(
+        (position) =>
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          }),
+        () => resolve({ latitude: 25.0866, longitude: 55.1474 }),
+        { enableHighAccuracy: true, timeout: 6000 },
+      ),
+    );
+    const response = await fetch("/api/basket", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "prepare-group",
+        restaurantName: mockItems[0]?.restaurant,
+        query: "burger",
+        ...location,
+      }),
+    });
+    const prepared = await response.json();
+    if (!response.ok) throw new Error(prepared.error);
+    const selections: Record<string, string[]> = {};
+    for (const item of prepared.items) {
+      selections[item.id] = [];
+      for (const group of item.requiredOptions ?? []) {
+        const answer = window.prompt(
+          `${item.name}: ${group.name}\n${group.options.map((option: { name: string; price: number }, index: number) => `${index + 1}. ${option.name}${option.price ? ` (+AED ${option.price})` : ""}`).join("\n")}\n\nEnter a number:`,
+        );
+        if (!answer) throw new Error("Group basket preparation cancelled.");
+        const selected = group.options[Number(answer) - 1];
+        if (!selected) throw new Error(`Invalid choice for ${group.name}.`);
+        selections[item.id].push(selected.id);
+      }
+    }
+    const realItems: Dish[] = prepared.items.map(
+      (item: { id: string; name: string; price: number; imageUrl?: string }) => ({
+        ...mockItems[0],
+        id: `careem-${item.id}`,
+        name: item.name,
+        restaurant: prepared.restaurant,
+        price: item.price,
+        imageUrl: item.imageUrl || mockItems[0].imageUrl,
+      }),
+    );
+    setGroupPlan({
+      confirmationId: prepared.confirmationId,
+      selections,
+      restaurant: prepared.restaurant,
+    });
+    setBasket(realItems);
+    setPanel("basket");
+    flash("Live Careem items prepared — vote before the host adds them");
+  };
+
+  const commitGroupBasket = async () => {
+    if (!groupPlan || committingGroup) return;
+    const confirmed = window.confirm(
+      `Add these ${basket.length} items from ${groupPlan.restaurant} to YOUR REAL Careem basket? Careem will charge you, the host, for the full order. ByteBite contribution amounts are simulated and no money is collected from friends.`,
+    );
+    if (!confirmed) return flash("Nothing was added");
+    setCommittingGroup(true);
+    try {
+      const response = await fetch("/api/basket", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "commit-group",
+          confirmationId: groupPlan.confirmationId,
+          selections: groupPlan.selections,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setGroupPlan(null);
+      setSplit(false);
+      flash(
+        result.partial
+          ? "Careem added some items; review the basket before checkout"
+          : "Items added to the host’s Careem basket",
+      );
+    } catch (error) {
+      flash(
+        error instanceof Error ? error.message : "Could not update the basket",
+      );
+    } finally {
+      setCommittingGroup(false);
+    }
   };
   const onScroll = (el: HTMLDivElement, now: number) => {
     const next = Math.round(el.scrollTop / el.clientHeight);
@@ -631,6 +1054,33 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
     setPanel(null);
     setSplit(false);
   }
+  if (appScreen === "connect")
+    return (
+      <div className="phone-shell">
+        <span className="dynamic-island" />
+        <main className="phone-screen relative h-full w-full overflow-hidden">
+          <CareemConnect />
+        </main>
+      </div>
+    );
+  if (appScreen === "home")
+    return (
+      <div className="phone-shell">
+        <span className="dynamic-island" />
+        <main className="phone-screen relative h-full w-full overflow-hidden">
+          <CareemHome onFood={() => setAppScreen("food")} />
+        </main>
+      </div>
+    );
+  if (appScreen === "food")
+    return (
+      <div className="phone-shell">
+        <span className="dynamic-island" />
+        <main className="phone-screen relative h-full w-full overflow-hidden">
+          <CareemFood onCrave={() => setAppScreen("crave")} />
+        </main>
+      </div>
+    );
   return (
     <div className="phone-shell">
       <span className="dynamic-island" />
@@ -966,9 +1416,16 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
               {panel === "room" && (
                 <TogetherPanel
                   baseDish={initialDishes[0]}
-                  onCreateCart={(items) => {
-                    setBasket(items);
-                    setPanel("basket");
+                  onCreateCart={async (items) => {
+                    try {
+                      await prepareGroupBasket(items);
+                    } catch (error) {
+                      flash(
+                        error instanceof Error
+                          ? error.message
+                          : "Could not prepare the group basket",
+                      );
+                    }
                   }}
                 />
               )}
@@ -1087,18 +1544,22 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
                     </div>
                     <button
                       disabled={!basket.length}
-                      onClick={() => setSplit(true)}
+                      onClick={() => {
+                        if (!groupPlan)
+                          return flash("Together creates the group contribution flow");
+                        setSplit(true);
+                      }}
                       className="rounded-xl bg-[#2de3a1] px-5 py-3 font-black text-[#07110d] disabled:opacity-30"
                     >
                       <Icon name="card" size={18} />{" "}
-                      <span className="ml-1">Split & checkout</span>
+                      <span className="ml-1">Vote on contributions</span>
                     </button>
                   </div>
                   {split && (
                     <SplitVote
                       basket={basket}
                       total={total}
-                      onComplete={() => flash("Payment links sent")}
+                      onComplete={commitGroupBasket}
                     />
                   )}
                 </div>
