@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -39,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# downloaded Careem sandbox source package
+/careem-mcp-sandbox.zip
+/careem-mcp-sandbox/
+/careem-mcp-typescript/dist/
+/careem-mcp-typescript/.run/

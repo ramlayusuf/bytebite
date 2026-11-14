@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "careem-mcp-sandbox/**",
+    "careem-mcp-typescript/**",
   ]),
 ]);
 
