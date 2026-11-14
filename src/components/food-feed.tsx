@@ -7,8 +7,6 @@ import {
   applyTasteSignal,
   emptyTasteProfile,
   rankDishes,
-  tasteReason,
-  tasteScore,
   type TasteProfile,
   type TasteSignal,
 } from "@/lib/recommendations";
@@ -1447,14 +1445,6 @@ export function FoodFeed({ initialDishes }: { initialDishes: Dish[] }) {
 
                   {/* Caption */}
                   <div className="text-shadow absolute bottom-4 left-3 right-[80px] z-10">
-                    <button
-                      onClick={() => flash(tasteReason(dish, profile))}
-                      className="mb-2.5 inline-flex items-center gap-1.5 rounded-md bg-black/45 px-2 py-1 text-[13px] font-semibold text-careem backdrop-blur-md [text-shadow:none]"
-                    >
-                      <Icon name="spark" size={14} />
-                      {tasteScore(dish, profile)}% match for you
-                    </button>
-
                     {/* Order anchor (TikTok Shop-style) */}
                     <div className="mb-3 flex items-center gap-2.5 rounded-xl bg-white p-1.5 pr-1.5 text-ink shadow-lg [text-shadow:none]">
                       <img
